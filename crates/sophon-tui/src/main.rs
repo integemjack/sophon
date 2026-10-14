@@ -143,11 +143,10 @@ fn dump_screen(args: &[String]) -> Result<()> {
         }
     };
     if let Some(d) = &tmp_override {
-        eprintln!("[dump] create data dir: {:?}", d.join("data"));
-        std::fs::create_dir_all(d.join("data"))?;
-        eprintln!("[dump] data dir ok");
-        std::env::set_var("FRIDAY_DATA_DIR", d.join("data"));
-        std::env::set_var("FRIDAY_CACHE_DIR", d.join("cache"));
+        eprintln!("[dump] data dir: {:?}", d);
+        std::fs::create_dir_all(d)?;
+        std::env::set_var("FRIDAY_DATA_DIR", d);
+        std::env::set_var("FRIDAY_CACHE_DIR", d);
     } else {
         std::fs::create_dir_all(&tmp)?;
     }
