@@ -288,7 +288,6 @@ impl AgentRunner {
 
         loop {
             round += 1;
-            eprintln!("[debug] round {} 开始", round);
             if round > max_rounds || cancel.is_cancelled() {
                 break;
             }
@@ -403,7 +402,6 @@ impl AgentRunner {
             }
 
             if tool_calls.is_empty() {
-                eprintln!("[debug] 无工具调用，准备结束回合");
                 // 交付自检（P3）：本回合改过代码且工作目录是 Rust 项目 → 交付前自动构建+测试
                 // （在 cargo test 环境里跳过：递归构建会锁死 target 目录）
                 if settings.delivery_check
@@ -669,10 +667,8 @@ impl AgentRunner {
         }
 
         // 回合结束：写统计、状态
-        eprintln!("[debug] 进入统计块（等 core 锁）tid={:?} conv={}", std::thread::current().id(), conversation_id);
         {
             let mut c = core.lock();
-            eprintln!("[debug] 统计块：拿到 core 锁 tid={:?}", std::thread::current().id());
             c.store.update_message(&conversation_id, &assistant_msg_id, |m| {
                 m.stats = Some(GenerationStats {
                     token_count: usage.generated_tokens,
@@ -686,22 +682,17 @@ impl AgentRunner {
                     ..Default::default()
                 });
             });
-            eprintln!("[debug] stats 已写 tid={:?}", std::thread::current().id());
             let mut gen = c.generating.lock();
             if let Some(g) = gen.get_mut(&conversation_id) {
                 g.is_generating = false;
                 g.is_stopping = false;
                 g.current_message_id = None;
             }
-            eprintln!("[debug] generating 已复位 tid={:?}", std::thread::current().id());
             drop(gen);
             c.update_runner_state();
-            eprintln!("[debug] runner_state 已更新 tid={:?}", std::thread::current().id());
             let _ = c.store.save();
-            eprintln!("[debug] 统计块完成 tid={:?}", std::thread::current().id());
         }
         core.lock().request_repaint();
-        eprintln!("[debug] 回合统计已写");
 
         // P4：交付后总结写经验（成功与失败都写）
         {
@@ -723,7 +714,6 @@ impl AgentRunner {
                 tags: vec!["交付".into()],
             });
         }
-        eprintln!("[debug] 经验已记录，回合线程退出");
     }
 }
 
