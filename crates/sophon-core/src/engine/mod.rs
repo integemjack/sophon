@@ -76,7 +76,7 @@ fn default_true() -> bool {
 }
 
 impl EngineConfig {
-    /// 只允许本机地址（用户约束：严禁云端 API / 联网依赖）
+    /// 是否本机地址（界面显示「本地/远程」标签用）
     pub fn is_local(&self) -> bool {
         let host = self
             .base_url

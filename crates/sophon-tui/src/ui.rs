@@ -206,7 +206,8 @@ fn render_chat(f: &mut Frame, area: Rect, app: &App) {
     // chat_scroll = 从底部向上滚的行数
     let bottom_offset = total.saturating_sub(view_h);
     let scroll_y = bottom_offset.saturating_sub(app.chat_scroll);
-    let para = Paragraph::new(lines).wrap(Wrap { trim: true }).scroll((0, scroll_y as u16));
+    // ratatui scroll 参数是 (垂直, 水平)
+    let para = Paragraph::new(lines).wrap(Wrap { trim: true }).scroll((scroll_y as u16, 0));
     f.render_widget(para, inner);
 }
 
@@ -462,6 +463,48 @@ fn render_settings(f: &mut Frame, area: Rect, app: &App) {
         )
     };
     let mut lines: Vec<Line> = vec![];
+    // ── 推理后端（本地模型 / 远程 API）──
+    let default_engine = {
+        let c = app.core.lock();
+        c.settings.default_engine_id.clone()
+    };
+    let entries = app.engine_entries();
+    lines.push(Line::from(Span::styled("推理后端（大脑）：本地模型 / 远程 API", Style::default().fg(Theme::dim()))));
+    for (i, (id, title, local, enabled)) in entries.iter().enumerate() {
+        let is_default = if id == "offline" { default_engine.is_none() } else { default_engine.as_deref() == Some(id.as_str()) };
+        let cursor = if i == app.engine_cursor { "▶ " } else { "  " };
+        let status = app
+            .engine_status
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| if id == "offline" { "内置可用".into() } else { "未探测（Enter 探测）".into() });
+        let line = Line::from(vec![
+            Span::styled(cursor, Style::default().fg(Theme::accent())),
+            Span::styled(
+                format!("{} ", title),
+                Style::default().fg(if is_default { Theme::accent() } else { Theme::subtext() }).add_modifier(if is_default { Modifier::BOLD } else { Modifier::empty() }),
+            ),
+            Span::styled(
+                format!("[{}] ", if *local { "本地" } else { "远程" }),
+                Style::default().fg(if *local { Theme::teal() } else { Theme::purple() }),
+            ),
+            Span::styled(
+                format!("{} ", if *enabled { "启用" } else { "停用" }),
+                Style::default().fg(if *enabled { Theme::green() } else { Theme::red() }),
+            ),
+            Span::styled(
+                if is_default { "← 当前默认 " } else { "" },
+                Style::default().fg(Theme::accent()),
+            ),
+            Span::styled(status, Style::default().fg(Theme::dim())),
+        ]);
+        lines.push(line);
+    }
+    lines.push(Line::from(Span::styled(
+        "  ↑↓ 选择 · Enter 设为默认并探测 · e 启停 · a 添加（名称|base_url|模型|密钥名）· x 删除 · Ctrl+E 快速切换",
+        Style::default().fg(Theme::dim()),
+    )));
+    lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("自主级别  ", Style::default().fg(Theme::dim())),
         Span::styled(mode_label.clone(), Style::default().fg(Theme::accent()).add_modifier(Modifier::BOLD)),

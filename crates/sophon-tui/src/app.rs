@@ -86,6 +86,10 @@ pub struct App {
     pub term_scroll: usize,
     /// 当前终端 id（右栏终端页签用）
     pub term_id: Option<String>,
+    /// 设置页：引擎光标 / 添加引擎向导 / 在线状态缓存
+    pub engine_cursor: usize,
+    pub adding_engine: bool,
+    pub engine_status: std::collections::HashMap<String, String>,
 }
 
 impl App {
@@ -122,6 +126,9 @@ impl App {
             show_help: false,
             term_scroll: 0,
             term_id: None,
+            engine_cursor: 0,
+            adding_engine: false,
+            engine_status: std::collections::HashMap::new(),
         }
     }
 
@@ -155,6 +162,9 @@ impl App {
             show_help: false,
             term_scroll: 0,
             term_id: None,
+            engine_cursor: 0,
+            adding_engine: false,
+            engine_status: std::collections::HashMap::new(),
         }
     }
 
@@ -467,6 +477,11 @@ impl App {
                     self.set_status(format!("交付自检：{}{}（Ctrl+D 切换）", if on { "开" } else { "关" }, if saved { "" } else { "（保存失败）" }));
                     return Ok(false);
                 }
+                // 需求 3：循环切换推理后端（内置离线 / 本地模型 / 远程 API）
+                KeyCode::Char('e') => {
+                    self.cycle_default_engine();
+                    return Ok(false);
+                }
                 KeyCode::Char('j') if self.focus == Focus::Input => {
                     self.insert_char('\n');
                     return Ok(false);
@@ -509,11 +524,20 @@ impl App {
     fn on_input_key(&mut self, k: KeyEvent) {
         match k.code {
             KeyCode::Enter => {
-                if self.is_generating() {
+                if self.adding_engine {
+                    self.finish_add_engine();
+                } else if self.is_generating() {
                     self.interject();
                 } else {
                     self.send();
                 }
+            }
+            KeyCode::Esc if self.adding_engine => {
+                self.adding_engine = false;
+                self.input.clear();
+                self.input_cursor = 0;
+                self.set_status("已取消添加后端");
+                self.mark_dirty();
             }
             KeyCode::Up => {
                 if !self.input_history.is_empty() {
@@ -672,6 +696,96 @@ impl App {
     }
 
     fn on_right_key(&mut self, k: KeyEvent) {
+        if self.right_tab == RightTab::Settings {
+            match k.code {
+                KeyCode::Up | KeyCode::PageUp => {
+                    self.engine_cursor = self.engine_cursor.saturating_sub(1);
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Down | KeyCode::PageDown => {
+                    let n = self.engine_entries().len().max(1);
+                    self.engine_cursor = (self.engine_cursor + 1).min(n - 1);
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    // 设为默认后端并探测在线状态
+                    let entries = self.engine_entries();
+                    if let Some(e) = entries.get(self.engine_cursor) {
+                        let (id, title) = (e.0.clone(), e.1.clone());
+                        self.set_default_engine(&id);
+                        let status = {
+                            let c = self.core.lock();
+                            c.probe_engine(&id)
+                        };
+                        self.engine_status.insert(id, status.clone());
+                        self.set_status(format!("默认后端：{} · {}", title, status));
+                    }
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Char('e') => {
+                    // 启停切换
+                    let entries = self.engine_entries();
+                    if let Some(e) = entries.get(self.engine_cursor) {
+                        let (id, title) = (e.0.clone(), e.1.clone());
+                        if id != "offline" {
+                            let (now, saved) = {
+                                let mut c = self.core.lock();
+                                let now = c.engines.get(&id).map(|x| x.enabled).unwrap_or(false);
+                                c.engines.set_enabled(&id, !now);
+                                (now, true)
+                            };
+                            self.set_status(format!("{}：{}{}", title, if now { "已停用" } else { "已启用" }, if saved { "" } else { "（保存失败）" }));
+                        }
+                    }
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Char('a') => {
+                    // 添加引擎向导：输入框里填 名称|base_url|模型|密钥名(可省)
+                    self.adding_engine = true;
+                    self.focus = Focus::Input;
+                    self.input.clear();
+                    self.input_cursor = 0;
+                    self.set_status("添加后端：名称|base_url|模型|密钥名(可省) —— 例 本地LLM|http://127.0.0.1:8080/v1|qwen2.5|；Enter 确认，Esc 取消");
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Char('x') => {
+                    let entries = self.engine_entries();
+                    if let Some(e) = entries.get(self.engine_cursor) {
+                        let (id, title) = (e.0.clone(), e.1.clone());
+                        if id != "offline" {
+                            {
+                                let mut c = self.core.lock();
+                                c.engines.remove(&id);
+                                if c.settings.default_engine_id.as_deref() == Some(id.as_str()) {
+                                    c.settings.default_engine_id = None;
+                                    let _ = c.settings.save(&c.paths.settings_file());
+                                }
+                            }
+                            self.set_status(format!("已删除后端：{}", title));
+                            self.engine_cursor = self.engine_cursor.saturating_sub(1);
+                        }
+                    }
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Esc => {
+                    self.focus = Focus::Input;
+                    self.mark_dirty();
+                    return;
+                }
+                KeyCode::Tab => {
+                    self.focus = Focus::Input;
+                    self.mark_dirty();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match k.code {
             KeyCode::Up | KeyCode::PageUp => self.right_scroll = self.right_scroll.saturating_add(1),
             KeyCode::Down | KeyCode::PageDown => self.right_scroll = self.right_scroll.saturating_sub(1),
@@ -705,22 +819,157 @@ impl App {
         self.set_status("终端已打开（右栏）");
     }
 
+    // ── 推理后端（需求 3：本地模型 / 远程 API）───────────
+
+    /// 引擎条目（含内置离线）：(id, 标题, 是否本地, 是否启用)
+    pub fn engine_entries(&self) -> Vec<(String, String, bool, bool)> {
+        let mut out = vec![("offline".to_string(), "内置离线引擎".to_string(), true, true)];
+        let c = self.core.lock();
+        for e in &c.engines.engines {
+            out.push((e.id.clone(), e.title.clone(), e.is_local(), e.enabled));
+        }
+        out
+    }
+
+    /// 当前默认引擎 id（None = 内置离线）
+    pub fn default_engine_id(&self) -> Option<String> {
+        let c = self.core.lock();
+        c.settings.default_engine_id.clone()
+    }
+
+    /// 循环切换默认后端（Ctrl+E）
+    pub fn cycle_default_engine(&mut self) {
+        let entries = self.engine_entries();
+        if entries.len() < 2 {
+            self.set_status("只有内置离线引擎。设置页（Ctrl+5）按 a 添加本地/远程后端");
+            self.mark_dirty();
+            return;
+        }
+        let cur = self.default_engine_id().unwrap_or_else(|| "offline".to_string());
+        let idx = entries
+            .iter()
+            .position(|e| e.0 == cur)
+            .map(|i| (i + 1) % entries.len())
+            .unwrap_or(0);
+        let (id, title, local, _) = entries[idx].clone();
+        self.set_default_engine(&id);
+        let status = {
+            let c = self.core.lock();
+            c.probe_engine(&id)
+        };
+        self.engine_status.insert(id, status.clone());
+        self.set_status(format!(
+            "推理后端：{}（{}） · {} —— Ctrl+E 继续切换",
+            title,
+            if local { "本地" } else { "远程" },
+            status
+        ));
+        self.mark_dirty();
+    }
+
+    fn set_default_engine(&mut self, id: &str) {
+        let mut c = self.core.lock();
+        c.settings.default_engine_id = if id == "offline" { None } else { Some(id.to_string()) };
+        let _ = c.settings.save(&c.paths.settings_file());
+    }
+
+    /// 探测引擎在线状态（薄壳，实现在 core::AppCore::probe_engine）
+    #[allow(dead_code)]
+    fn probe_engine(&self, id: &str) -> String {
+        let c = self.core.lock();
+        c.probe_engine(id)
+    }
+
+    /// 添加引擎向导：解析 名称|base_url|模型|密钥名(可省)
+    fn finish_add_engine(&mut self) {
+        self.adding_engine = false;
+        let text = self.input.trim().to_string();
+        self.input.clear();
+        self.input_cursor = 0;
+        let parts: Vec<&str> = text.split('|').map(|s| s.trim()).collect();
+        if parts.len() < 3 || parts.iter().take(3).any(|s| s.is_empty()) {
+            self.set_status("格式：名称|base_url|模型|密钥名(可省)，至少填前三段");
+            self.mark_dirty();
+            return;
+        }
+        let cfg = sophon_core::engine::EngineConfig {
+            id: format!("eng-{}", &sophon_core::new_uuid()[..8]),
+            title: parts[0].to_string(),
+            base_url: parts[1].trim_end_matches('/').to_string(),
+            api_key_secret: parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+            model: parts[2].to_string(),
+            supports_tools: true,
+            enabled: true,
+        };
+        let title = cfg.title.clone();
+        let local = cfg.is_local();
+        let add_ok;
+        {
+            let mut c = self.core.lock();
+            add_ok = c.engines.add(cfg).is_ok();
+        }
+        if add_ok {
+            self.set_status(format!(
+                "已添加后端：{}（{}）—— Enter 设为默认",
+                title,
+                if local { "本地" } else { "远程" }
+            ));
+            let n = self.engine_entries().len();
+            self.engine_cursor = n.saturating_sub(1);
+        } else {
+            self.set_status("保存引擎配置失败");
+        }
+        self.mark_dirty();
+    }
+
     // ── 鼠标 ──────────────────────────────────────
 
     pub fn on_mouse(&mut self, m: MouseEvent, area: ratatui::layout::Rect) {
+        let hit = self.hit_area(m.column, m.row, area);
         match m.kind {
-            MouseEventKind::ScrollUp => match self.focus {
-                Focus::Chat => self.chat_scroll = self.chat_scroll.saturating_add(2),
-                Focus::RightPanel => self.right_scroll = self.right_scroll.saturating_add(1),
-                _ => self.sidebar_scroll = self.sidebar_scroll.saturating_add(1),
+            // 滚轮按鼠标所在区域分流（与键盘焦点无关）
+            MouseEventKind::ScrollUp => match hit {
+                Some(Focus::Chat) | Some(Focus::Input) => {
+                    self.chat_scroll = self.chat_scroll.saturating_add(2);
+                }
+                Some(Focus::RightPanel) => {
+                    self.right_scroll = self.right_scroll.saturating_add(1);
+                }
+                _ => {
+                    self.sidebar_scroll = self.sidebar_scroll.saturating_add(1);
+                }
             },
-            MouseEventKind::ScrollDown => match self.focus {
-                Focus::Chat => self.chat_scroll = self.chat_scroll.saturating_sub(2),
-                Focus::RightPanel => self.right_scroll = self.right_scroll.saturating_sub(1),
-                _ => self.sidebar_scroll = self.sidebar_scroll.saturating_sub(1),
+            MouseEventKind::ScrollDown => match hit {
+                Some(Focus::Chat) | Some(Focus::Input) => {
+                    self.chat_scroll = self.chat_scroll.saturating_sub(2);
+                }
+                Some(Focus::RightPanel) => {
+                    self.right_scroll = self.right_scroll.saturating_sub(1);
+                }
+                _ => {
+                    self.sidebar_scroll = self.sidebar_scroll.saturating_sub(1);
+                }
             },
             MouseEventKind::Down(_btn) => self.on_click(m.column, m.row, area),
             _ => {}
+        }
+    }
+
+    /// 鼠标坐标落在哪个区域（与 ui::draw 布局一致）；标题栏/状态栏返回 None
+    fn hit_area(&self, x: u16, y: u16, area: ratatui::layout::Rect) -> Option<Focus> {
+        let (w, h) = (area.width, area.height);
+        if y == 0 || y + 1 >= h {
+            return None;
+        }
+        if y + 4 >= h {
+            return Some(Focus::Input);
+        }
+        if x < ui::SIDEBAR_W {
+            Some(Focus::Sidebar)
+        } else if x >= w.saturating_sub(ui::RIGHT_W) {
+            Some(Focus::RightPanel)
+        } else {
+            Some(Focus::Chat)
         }
     }
 
@@ -905,6 +1154,51 @@ mod tests {
         };
         app.on_mouse(ev, SIZE);
         assert_eq!(app.chat_scroll, 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn add_engine_parses_fields() {
+        let (mut app, dir) = test_app("addeng");
+        app.adding_engine = true;
+        app.input = "本地Qwen|http://127.0.0.1:8080/v1|qwen2.5|".to_string();
+        app.finish_add_engine();
+        assert!(!app.adding_engine);
+        let c = app.core.lock();
+        assert_eq!(c.engines.engines.len(), 1);
+        let e = &c.engines.engines[0];
+        assert_eq!(e.title, "本地Qwen");
+        assert_eq!(e.base_url, "http://127.0.0.1:8080/v1");
+        assert_eq!(e.model, "qwen2.5");
+        assert_eq!(e.api_key_secret, None);
+        drop(c);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cycle_engine_with_only_offline_shows_hint() {
+        let (mut app, dir) = test_app("cycle");
+        app.cycle_default_engine();
+        assert!(app.status.contains("只有内置离线引擎"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scroll_follows_mouse_area_not_focus() {
+        let (mut app, dir) = test_app("scrollarea");
+        // 回归：键盘焦点在输入框（初始默认）时，滚轮在对话区应滚对话，而不是滚侧栏
+        app.focus = Focus::Input;
+        app.chat_scroll = 0;
+        app.sidebar_scroll = 0;
+        let ev = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 60,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.on_mouse(ev, SIZE);
+        assert_eq!(app.chat_scroll, 2, "对话区滚轮应改 chat_scroll");
+        assert_eq!(app.sidebar_scroll, 0, "不应误滚侧栏");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

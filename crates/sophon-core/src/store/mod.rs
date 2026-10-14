@@ -635,6 +635,42 @@ impl AppCore {
         }
     }
 
+    /// 探测引擎在线状态（GET /models，1.5s 超时；离线引擎直接标可用）
+    pub fn probe_engine(&self, id: &str) -> String {
+        if id == "offline" {
+            return "内置可用".to_string();
+        }
+        let Some(cfg) = self.engines.get(id).cloned() else {
+            return "已删除".to_string();
+        };
+        let url = format!("{}/models", cfg.base_url.trim_end_matches('/'));
+        let mut req = ureq::get(&url).timeout(std::time::Duration::from_millis(1500));
+        if let Some(name) = &cfg.api_key_secret {
+            if let Some(key) = AppCore::with_secret(name) {
+                if !key.is_empty() {
+                    req = req.set("Authorization", &format!("Bearer {}", key));
+                }
+            }
+        }
+        match req.call() {
+            Ok(r) => match r.into_string() {
+                Ok(body) => {
+                    let n = serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|v| v["data"].as_array().map(|a| a.len()))
+                        .unwrap_or(0);
+                    if n > 0 {
+                        format!("在线（{} 个模型）", n)
+                    } else {
+                        "在线".to_string()
+                    }
+                }
+                Err(_) => "在线".to_string(),
+            },
+            Err(e) => format!("不可达（{}）", e),
+        }
+    }
+
     /// 取当前生效的引擎（会话选 → 默认 → 第一个）
     pub fn resolved_engine(&self, conversation: &Conversation) -> Option<crate::engine::EngineConfig> {
         self.engines

@@ -60,6 +60,39 @@ impl super::ChatEngine for OfflineEngine {
         let has = |name: &str| tools.contains(&name);
 
         // ── 意图路由：按关键词决定调哪个工具 ──
+        // 联网搜索（放在文件搜索之前：「搜索X」「搜一下X」优先联网；明确「搜文件/搜内容」才走本地）
+        if (lower.contains("联网")
+            || lower.contains("上网")
+            || lower.contains("网上")
+            || lower.contains("互联网")
+            || lower.contains("搜一下")
+            || lower.contains("查一下")
+            || lower.contains("搜索") && !lower.contains("文件") && !lower.contains("内容")
+            || lower.contains("最新")
+            || lower.contains("新闻")
+            || lower.contains("web_search"))
+            && has("web_search")
+        {
+            let query = extract_quoted(&last_user)
+                .or_else(|| {
+                    for kw in ["搜索", "搜一下", "查一下", "查查", "联网查", "联网搜索"] {
+                        if let Some(pos) = last_user.find(kw) {
+                            let rest = last_user[pos + kw.len()..].trim();
+                            if !rest.is_empty() {
+                                return Some(rest.to_string());
+                            }
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_else(|| last_user.trim().to_string());
+            sink(EngineEvent::ToolCall {
+                id: crate::models::new_uuid(),
+                name: "web_search".to_string(),
+                arguments: serde_json::json!({"query": query}),
+            });
+            return Ok(());
+        }
         // 跑命令
         if (lower.contains("运行") || lower.contains("执行") || lower.contains("跑一下") || lower.contains("run"))
             && has("run_shell")

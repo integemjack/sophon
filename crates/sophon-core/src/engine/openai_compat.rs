@@ -11,12 +11,8 @@ pub struct OpenAICompatEngine {
 
 impl OpenAICompatEngine {
     pub fn new(config: EngineConfig) -> anyhow::Result<Self> {
-        if !config.is_local() {
-            return Err(anyhow!(
-                "按用户约束只允许本机地址（127.0.0.1 / localhost），拒绝：{}",
-                config.base_url
-            ));
-        }
+        // 远程 API 已按用户要求支持（SOPHON 迭代：本地模型 / 远程 OpenAI 兼容后端可切换）；
+        // is_local() 仅用于界面显示「本地/远程」标签
         Ok(OpenAICompatEngine { config })
     }
 

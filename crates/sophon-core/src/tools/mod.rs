@@ -100,6 +100,7 @@ impl ToolRegistry {
             Box::new(builtin::ReadAgentLog),
             Box::new(builtin::ListTools),
             Box::new(builtin::GetCurrentTime),
+            Box::new(builtin::WebSearch),
             Box::new(builtin::AnalyzeImage),
             Box::new(builtin::GenerateImage),
             Box::new(builtin::TranscribeAudio),

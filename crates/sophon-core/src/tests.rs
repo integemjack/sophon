@@ -230,7 +230,7 @@ fn test_offline_engine_answers_questions() {
     assert!(text.contains("Sophon"), "回答应含 Sophon: {}", text);
 }
 
-// ── 引擎：本机地址校验（严禁云端）───────────────
+// ── 引擎：本地/远程地址识别（远程 API 现已支持）───────
 
 #[test]
 fn test_engine_local_only() {
@@ -257,6 +257,7 @@ fn test_engine_local_only() {
     };
     assert!(localhost.is_local());
 
+    // 远程 API 现已支持（用户要求：本地模型/远程 API 可切换）；is_local 仅作标签
     let remote = EngineConfig {
         id: "openai".to_string(),
         title: "OpenAI".to_string(),
@@ -266,8 +267,8 @@ fn test_engine_local_only() {
         supports_tools: true,
         enabled: true,
     };
-    assert!(!remote.is_local(), "云端地址应拒绝");
-    assert!(OpenAICompatEngine::new(remote).is_err(), "云端地址应构造失败");
+    assert!(!remote.is_local(), "云端地址应标记为远程");
+    assert!(OpenAICompatEngine::new(remote).is_ok(), "远程引擎应允许构造");
 }
 
 // ── 工具：实际执行 ───────────────────────────────

@@ -16,7 +16,7 @@ parking_lot = "0.12"
 dirs = "6"
 portable-pty = "0.8"
 vte = "0.13"
-ureq = { version = "2", default-features = false, features = ["json", "charset"] }
+ureq = { version = "2", default-features = false, features = ["json", "charset", "tls"] }
 base64 = "0.22"
 tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
 
