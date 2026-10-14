@@ -22,3 +22,4 @@ sophon_p5_setup.bat
 
 # 历史误建目录
 %D%/
+/sophon-tui/ 
