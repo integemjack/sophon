@@ -51,6 +51,16 @@ fn main() -> Result<()> {
 }
 
 fn run_tui() -> Result<()> {
+    // 最小尺寸防御：极窄终端下 UI 会越界（之前在 30 列终端实测 panic）。
+    // 实测 ≥80x24 全部安全（dump 模式验证过 80x24 / 100x30 / 120x30 / 120x36 / 120x38）。
+    let (tw, th) = crossterm::terminal::size()?;
+    if tw < 80 || th < 24 {
+        let _ = disable_raw_mode();
+        anyhow::bail!(
+            "终端窗口太小（{}x{}）：至少需要 80x24。请拉大终端窗口后重试。",
+            tw, th
+        );
+    }
     // 终端进入原始模式 + 备用屏
     enable_raw_mode()?;
     let mut stdout = stdout();
