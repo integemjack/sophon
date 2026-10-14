@@ -14,6 +14,10 @@ use crate::app::{App, Focus, RightTab};
 use crate::markdown::render_markdown;
 use crate::theme::Theme;
 
+/// 布局常量：左栏宽 / 右栏宽（app.rs 鼠标命中判定同用，保持单一来源）
+pub const SIDEBAR_W: u16 = 28;
+pub const RIGHT_W: u16 = 42;
+
 /// 入口
 pub fn draw(f: &mut Frame, app: &App) {
     let areas = Layout::default()
@@ -28,7 +32,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     render_title_bar(f, areas[0], app);
     let main = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(28), Constraint::Min(0), Constraint::Length(42)])
+        .constraints([
+            Constraint::Length(SIDEBAR_W),
+            Constraint::Min(0),
+            Constraint::Length(RIGHT_W),
+        ])
         .split(areas[1]);
     render_sidebar(f, main[0], app);
     render_chat(f, main[1], app);

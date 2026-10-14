@@ -189,7 +189,11 @@ impl App {
                             }
                         }
                     }
-                    Event::Mouse(m) => self.on_mouse(m),
+                    Event::Mouse(m) => {
+                        let sz = terminal.size().unwrap_or_default();
+                        let area = ratatui::layout::Rect::new(0, 0, sz.width, sz.height);
+                        self.on_mouse(m, area);
+                    }
                     Event::Resize(_, _) => self.mark_dirty(),
                     _ => {}
                 }
@@ -703,7 +707,7 @@ impl App {
 
     // ── 鼠标 ──────────────────────────────────────
 
-    pub fn on_mouse(&mut self, m: MouseEvent) {
+    pub fn on_mouse(&mut self, m: MouseEvent, area: ratatui::layout::Rect) {
         match m.kind {
             MouseEventKind::ScrollUp => match self.focus {
                 Focus::Chat => self.chat_scroll = self.chat_scroll.saturating_add(2),
@@ -715,21 +719,57 @@ impl App {
                 Focus::RightPanel => self.right_scroll = self.right_scroll.saturating_sub(1),
                 _ => self.sidebar_scroll = self.sidebar_scroll.saturating_sub(1),
             },
-            MouseEventKind::Down(_btn) => {
-                // 点击位置切换焦点（简化：按列）
-                let (w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                let col_f = m.column as f64 / w as f64;
-                self.focus = if col_f < 0.22 {
-                    Focus::Sidebar
-                } else if col_f > 0.78 {
-                    Focus::RightPanel
-                } else {
-                    Focus::Chat
-                };
-                self.mark_dirty();
-            }
+            MouseEventKind::Down(_btn) => self.on_click(m.column, m.row, area),
             _ => {}
         }
+    }
+
+    /// 点击命中：坐标判定与 ui::draw 的布局完全一致（单一来源 ui::SIDEBAR_W / ui::RIGHT_W）。
+    /// 布局：header y=0；main y∈[1,h-4)；输入框 y∈[h-4,h-1)；状态栏 y=h-1；
+    /// 主区横向：侧栏 x∈[0,28)、对话 x∈[28,w-42)、右栏 x∈[w-42,w)。
+    fn on_click(&mut self, x: u16, y: u16, area: ratatui::layout::Rect) {
+        let (w, h) = (area.width, area.height);
+        // 顶部标题行 / 底部状态栏：无点击行为
+        if y == 0 || y + 1 >= h {
+            return;
+        }
+        // 底部输入框（3 行）：聚焦输入框，点击后可直接打字
+        if y + 4 >= h {
+            self.focus = Focus::Input;
+            self.searching = false;
+            self.mark_dirty();
+            return;
+        }
+        // 主区：按真实布局边界判定
+        if x < ui::SIDEBAR_W {
+            // 侧栏：搜索框（y∈[1,4)）进搜索；会话列表条目（y≥5，每条 2 行）选中
+            self.focus = Focus::Sidebar;
+            if y < 4 {
+                self.searching = true;
+            } else if y >= 5 {
+                let idx = ((y - 5) / 2) as usize;
+                let convs = self.conversation_list();
+                if let Some(c) = convs.get(idx) {
+                    self.selected_conv = Some(c.id.clone());
+                    self.sidebar_scroll = idx;
+                }
+            }
+        } else if x >= w.saturating_sub(ui::RIGHT_W) {
+            // 右栏：页签行（chunk y∈[1,4)，文字在 y=2）切页签；其余聚焦右栏
+            self.focus = Focus::RightPanel;
+            self.searching = false;
+            if y == 2 {
+                let rx = x.saturating_sub(w - ui::RIGHT_W);
+                // 页签从列 1 起，5 个均分（每格约 8 列）
+                let i = (rx.saturating_sub(1) / 8).min(4) as usize;
+                self.right_tab = RightTab::all()[i];
+            }
+        } else {
+            // 对话区
+            self.focus = Focus::Chat;
+            self.searching = false;
+        }
+        self.mark_dirty();
     }
 
     // ── 帮助 ──────────────────────────────────────
@@ -768,4 +808,103 @@ pub fn load_core() -> anyhow::Result<Arc<Mutex<AppCore>>> {
     let core = Arc::new(Mutex::new(AppCore::load(paths, main_tx)?));
     core.lock().set_secret_reader();
     Ok(core)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    fn test_app(name: &str) -> (App, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("sophon_tui_test_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut paths = sophon_core::util::Paths::resolve();
+        paths.data_dir = dir.join("data");
+        paths.cache_dir = dir.join("cache");
+        let (mt, rx) = sophon_core::util::main_thread::channel();
+        let core = Arc::new(Mutex::new(AppCore::load(paths, mt).unwrap()));
+        core.lock().set_secret_reader();
+        let app = App::new(core, rx, Arc::new(AtomicBool::new(true)));
+        (app, dir)
+    }
+
+    const SIZE: Rect = Rect { x: 0, y: 0, width: 120, height: 36 };
+
+    #[test]
+    fn click_input_bar_focuses_input() {
+        let (mut app, dir) = test_app("input");
+        app.focus = Focus::Chat;
+        // 底部输入框：y∈[32,35)（h=36 时）
+        app.on_click(60, 33, SIZE);
+        assert_eq!(app.focus, Focus::Input);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn click_regions_match_layout() {
+        let (mut app, dir) = test_app("regions");
+        // 对话区
+        app.on_click(60, 10, SIZE);
+        assert_eq!(app.focus, Focus::Chat);
+        // 右栏（从 120-42=78 列起）
+        app.on_click(100, 10, SIZE);
+        assert_eq!(app.focus, Focus::RightPanel);
+        // 侧栏（0..28 列）
+        app.on_click(10, 10, SIZE);
+        assert_eq!(app.focus, Focus::Sidebar);
+        // 回归旧 bug：x=80 在旧比例逻辑（0.78*120≈93.6）下会被误判成对话区
+        app.on_click(80, 10, SIZE);
+        assert_eq!(app.focus, Focus::RightPanel);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn click_tabs_switches_tab() {
+        let (mut app, dir) = test_app("tabs");
+        app.on_click(85, 2, SIZE); // 第 1 个页签：Agent 树
+        assert_eq!(app.focus, Focus::RightPanel);
+        assert_eq!(app.right_tab, RightTab::AgentTree);
+        app.on_click(100, 2, SIZE); // rx=22 → 第 3 个页签：状态板
+        assert_eq!(app.right_tab, RightTab::Board);
+        app.on_click(119, 2, SIZE); // rx=41 → 第 5 个页签：设置
+        assert_eq!(app.right_tab, RightTab::Settings);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn click_search_box_enters_search() {
+        let (mut app, dir) = test_app("search");
+        app.on_click(10, 2, SIZE); // 侧栏搜索框（y∈[1,4)）
+        assert!(app.searching);
+        assert_eq!(app.focus, Focus::Sidebar);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn click_header_and_status_ignored() {
+        let (mut app, dir) = test_app("hdr");
+        app.focus = Focus::Chat;
+        app.on_click(60, 0, SIZE); // 标题栏
+        assert_eq!(app.focus, Focus::Chat);
+        app.on_click(60, 35, SIZE); // 状态栏（y=h-1）
+        assert_eq!(app.focus, Focus::Chat);
+        assert!(!app.searching);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scroll_in_chat_adjusts_chat_scroll() {
+        let (mut app, dir) = test_app("scroll");
+        app.focus = Focus::Chat;
+        app.chat_scroll = 4;
+        let ev = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 60,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.on_mouse(ev, SIZE);
+        assert_eq!(app.chat_scroll, 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
