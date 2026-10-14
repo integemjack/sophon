@@ -507,6 +507,22 @@ mod tests {
         assert_eq!(urlencode("智子"), "%E6%99%BA%E5%AD%90");
     }
 
+    /// RSI 演示发现的 bug：实体解码不全——数字/十六进制实体和常见命名实体不解码，
+    /// 中文网页高频的 &mdash; &middot; &rsquo; 会原样残留在 web_read 输出里
+    #[test]
+    fn decode_entities_numeric_and_named() {
+        // 数字实体
+        assert_eq!(strip_tags("&#65;&#66;&#67;"), "ABC");
+        // 十六进制实体
+        assert_eq!(strip_tags("&#x2014;"), "—");
+        assert_eq!(strip_tags("&#X41;"), "A");
+        // 常见命名实体（中文页面高频）
+        assert_eq!(strip_tags("a &mdash; b"), "a — b");
+        assert_eq!(strip_tags("x &middot; y"), "x · y");
+        assert_eq!(strip_tags("it&rsquo;s"), "it’s");
+        assert_eq!(strip_tags("&copy; 2026"), "© 2026");
+    }
+
     #[test]
     #[ignore] // 真实联网 + headless：cargo test -p sophon-core web_live -- --ignored
     fn web_research_live() {
