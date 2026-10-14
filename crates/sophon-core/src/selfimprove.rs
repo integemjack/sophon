@@ -147,7 +147,13 @@ pub fn run_self_improve(
                 let path = std::path::Path::new(repo).join(file);
                 match std::fs::read_to_string(&path) {
                     Ok(content) => {
-                        let n = content.matches(old.as_str()).count();
+                        // 换行归一化：磁盘文件可能是 CRLF（git autocrlf），计划里是 LF。
+                        // 在 LF 世界里匹配/替换，写回时按原文件的行尾风格还原，避免整个文件 diff。
+                        let crlf = content.contains("\r\n");
+                        let content_lf = content.replace("\r\n", "\n");
+                        let old_lf = old.replace("\r\n", "\n");
+                        let new_lf = new.replace("\r\n", "\n");
+                        let n = content_lf.matches(old_lf.as_str()).count();
                         if n != 1 {
                             apply_failed = Some(format!(
                                 "{}：替换目标出现 {} 次（应为 1），放弃这一步",
@@ -155,7 +161,11 @@ pub fn run_self_improve(
                             ));
                             break;
                         }
-                        if std::fs::write(&path, content.replacen(old.as_str(), new.as_str(), 1)).is_err() {
+                        let mut result = content_lf.replacen(old_lf.as_str(), new_lf.as_str(), 1);
+                        if crlf {
+                            result = result.replace('\n', "\r\n");
+                        }
+                        if std::fs::write(&path, result).is_err() {
                             apply_failed = Some(format!("{}：写入失败", file));
                             break;
                         }
@@ -292,6 +302,55 @@ fn one_line(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RSI 第二层回归：Edit 步对 CRLF 文件的匹配（管道自身曾因这个 bug 修不了目标）
+    #[test]
+    fn edit_handles_crlf_files() {
+        let dir = std::env::temp_dir().join(format!("sophon_crlf_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        // git init + 身份 + 基线提交（含 CRLF 文件）
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap()
+        };
+        let _ = git(&["init", "-b", "main"]);
+        let _ = git(&["config", "user.name", "t"]);
+        let _ = git(&["config", "user.email", "t@t"]);
+        std::fs::write(
+            repo.join("src/lib.rs"),
+            "fn add(a: i32, b: i32) -> i32 {\r\n    a - b\r\n}\r\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"crlfdemo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let _ = git(&["add", "-A"]);
+        let _ = git(&["commit", "-m", "init"]);
+        // 计划用 LF 写 old/new
+        let plan = vec![FixStep::Edit {
+            file: "src/lib.rs".into(),
+            old: "a - b".into(),
+            new: "a + b".into(),
+        }];
+        let mut lessons = LessonStore::in_memory();
+        let repo_s = repo.to_str().unwrap();
+        // 验证命令：bug（a - b）在时红，修复后绿
+        let verify = "if (Select-String -Path src/lib.rs -Pattern 'a - b' -Quiet) { exit 1 } else { exit 0 }";
+        let report = run_self_improve(repo_s, "CRLF Edit 测试", &plan, verify, &mut lessons);
+        assert!(report.verified, "CRLF 文件 Edit 应成功：{:?}", report.notes);
+        assert!(report.merged);
+        let after = std::fs::read_to_string(repo.join("src/lib.rs")).unwrap();
+        assert!(after.contains("a + b"));
+        assert!(after.contains("\r\n"), "应保持 CRLF 行尾");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn refuses_non_repo() {
