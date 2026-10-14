@@ -12,6 +12,7 @@ pub mod remote;
 pub mod autonomy;
 pub mod learning;
 pub mod selfimprove;
+pub mod web;
 
 pub use models::*;
 pub use util::{CancelToken, MainThread, Paths};

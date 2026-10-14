@@ -1,4 +1,4 @@
-// 内置工具实现。
+﻿// 内置工具实现。
 // 对应 docs/ARCHITECTURE.md 的 AgentTools（run_shell / 文件 / 搜索 / 终端 / 子 Agent …）。
 use super::{glob_match, resolve_path, Tool, ToolContext, ToolOutput};
 use crate::agent::team::AgentProfile;
@@ -1217,7 +1217,7 @@ capability_stub!(
     json!({"type": "object", "properties": {"audio": {"type": "string"}}, "required": ["audio"]})
 );
 
-// ── 联网搜索（web_search）：Bing 网页抓取，免 API Key ─────────────
+// ── 联网能力工具：搜索 / 读页 / 自动调研（实现在 crate::web）────
 
 pub struct WebSearch;
 
@@ -1225,12 +1225,13 @@ impl Tool for WebSearch {
     fn name(&self) -> &str { "web_search" }
     fn title(&self) -> &str { "联网搜索" }
     fn description(&self) -> &str {
-        "联网搜索：用 Bing 查询并返回前几条结果（标题、链接、摘要）。适合查最新信息、资料、报错。"
+        "联网搜索：抓搜索引擎结果页（Bing/百度），返回标题、链接、摘要。适合查最新信息、资料、报错。需要读正文用 web_research。"
     }
     fn parameters(&self) -> Value {
         json!({"type": "object", "properties": {
             "query": {"type": "string", "description": "搜索关键词"},
-            "count": {"type": "integer", "description": "返回条数，默认 5，最多 8"}
+            "count": {"type": "integer", "description": "返回条数，默认 5，最多 8"},
+            "engine": {"type": "string", "description": "搜索引擎：bing（默认）或 baidu"}
         }, "required": ["query"]})
     }
     fn execute(&self, args: &Value, _ctx: &mut ToolContext) -> ToolOutput {
@@ -1239,168 +1240,78 @@ impl Tool for WebSearch {
             return ToolOutput::Err("缺少搜索关键词".to_string());
         }
         let count = args["count"].as_u64().unwrap_or(5).clamp(1, 8) as usize;
-        match search_bing(query, count) {
+        let engine = args["engine"].as_str().unwrap_or("bing");
+        match crate::web::search(engine, query, count) {
+            Ok(hits) => {
+                let mut out = format!("搜索「{}」结果（{}）：\n", query, engine);
+                for (i, (title, url, snippet)) in hits.iter().enumerate() {
+                    out.push_str(&format!("{}. {}\n   {}\n   {}\n", i + 1, title, url, snippet));
+                }
+                ToolOutput::Ok(out)
+            }
+            Err(e) => ToolOutput::Err(e),
+        }
+    }
+}
+
+pub struct WebRead;
+
+impl Tool for WebRead {
+    fn name(&self) -> &str { "web_read" }
+    fn title(&self) -> &str { "网页读取" }
+    fn description(&self) -> &str {
+        "用 headless 浏览器打开网页（执行 JavaScript 后）提取正文文本。能读动态渲染页（SPA、搜索结果页等）。"
+    }
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {
+            "url": {"type": "string", "description": "要读取的网页地址（http/https）"},
+            "max_chars": {"type": "integer", "description": "正文最多返回字符数，默认 6000"}
+        }, "required": ["url"]})
+    }
+    fn execute(&self, args: &Value, _ctx: &mut ToolContext) -> ToolOutput {
+        let url = args["url"].as_str().unwrap_or("").trim();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return ToolOutput::Err("url 必须以 http:// 或 https:// 开头".to_string());
+        }
+        let max_chars = args["max_chars"].as_u64().unwrap_or(6000).clamp(500, 20000) as usize;
+        match crate::web::fetch_rendered(url, 8000, std::time::Duration::from_secs(40)) {
+            Ok(html) => {
+                let text = crate::web::extract_main_text(&html, max_chars);
+                if text.trim().is_empty() {
+                    ToolOutput::Err(format!("页面渲染后无正文（可能全屏 JS 应用或需要登录）：{}", url))
+                } else {
+                    ToolOutput::Ok(format!("{} 的正文：\n{}", url, text))
+                }
+            }
+            Err(e) => ToolOutput::Err(format!("读取失败：{}", e)),
+        }
+    }
+}
+
+pub struct WebResearch;
+
+impl Tool for WebResearch {
+    fn name(&self) -> &str { "web_research" }
+    fn title(&self) -> &str { "联网调研" }
+    fn description(&self) -> &str {
+        "自动联网调研：拿问题自动搜索（Bing+百度）→ 逐个用 headless 浏览器读取结果页正文（含 JS 渲染）→ 汇总为带来源的资料。回答最新信息/事实类问题优先用它。"
+    }
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {
+            "question": {"type": "string", "description": "要调研的问题或关键词"},
+            "max_pages": {"type": "integer", "description": "读取几个结果页，默认 2，最多 4"}
+        }, "required": ["question"]})
+    }
+    fn execute(&self, args: &Value, _ctx: &mut ToolContext) -> ToolOutput {
+        let question = args["question"].as_str().unwrap_or("").trim();
+        if question.is_empty() {
+            return ToolOutput::Err("缺少调研问题".to_string());
+        }
+        let max_pages = args["max_pages"].as_u64().unwrap_or(2).clamp(1, 4) as usize;
+        match crate::web::web_research(question, max_pages) {
             Ok(out) => ToolOutput::Ok(out),
             Err(e) => ToolOutput::Err(e),
         }
     }
 }
 
-/// 真实联网搜索（也供 #[ignore] live 测试直接调用）
-fn search_bing(query: &str, count: usize) -> Result<String, String> {
-    let url = format!(
-        "https://www.bing.com/search?q={}&mkt=zh-CN&count={}",
-        urlencode(query),
-        count
-    );
-    let resp = ureq::get(&url)
-        .set(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        )
-        .set("Accept-Language", "zh-CN,zh;q=0.9")
-        .timeout(std::time::Duration::from_secs(15))
-        .call();
-    let mut html = match resp {
-        Ok(r) => {
-            let mut html = String::new();
-            use std::io::Read;
-            if let Err(e) = r.into_reader().take(2_000_000).read_to_string(&mut html) {
-                return Err(format!("读取搜索结果失败：{}", e));
-            }
-            html
-        }
-        Err(e) => {
-            return Err(format!(
-                "联网搜索失败：{}（请检查网络连接；搜索引擎可能临时限制访问）",
-                e
-            ))
-        }
-    };
-    let results = parse_bing_results(&html, count);
-    if results.is_empty() {
-        let msg = format!(
-            "搜索无结果或页面结构变化（query={}，页面 {} 字节）",
-            query,
-            html.len()
-        );
-        html.clear();
-        return Err(msg);
-    }
-    let mut out = format!("搜索「{}」结果：\n", query);
-    for (i, (title, url, snippet)) in results.iter().enumerate() {
-        out.push_str(&format!("{}. {}\n   {}\n   {}\n", i + 1, title, url, snippet));
-    }
-    html.clear();
-    Ok(out)
-}
-
-/// 百分号编码（UTF-8）
-fn urlencode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
-
-/// 从 Bing 搜索结果页提取 (标题, 链接, 摘要) 列表
-fn parse_bing_results(html: &str, max: usize) -> Vec<(String, String, String)> {
-    let re_item = regex::Regex::new(r#"(?s)<li class="b_algo".*?</li>"#).unwrap();
-    let re_link = regex::Regex::new(r#"(?s)<h2><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#).unwrap();
-    let re_p = regex::Regex::new(r#"(?s)<p[^>]*>(.*?)</p>"#).unwrap();
-    let mut out = Vec::new();
-    for item in re_item.find_iter(html) {
-        let block = item.as_str();
-        let (url, title) = match re_link.captures(block) {
-            Some(c) => (
-                c.get(1).map(|m| m.as_str().to_string()).unwrap_or_default(),
-                strip_tags(c.get(2).map(|m| m.as_str()).unwrap_or("")),
-            ),
-            None => continue,
-        };
-        if url.is_empty() || title.is_empty() {
-            continue;
-        }
-        let snippet = re_p
-            .captures(block)
-            .map(|c| strip_tags(c.get(1).map(|m| m.as_str()).unwrap_or("")))
-            .unwrap_or_default();
-        out.push((title, url, snippet));
-        if out.len() >= max {
-            break;
-        }
-    }
-    out
-}
-
-/// 去 HTML 标签 + 解码常见实体
-fn strip_tags(s: &str) -> String {
-    let re = regex::Regex::new(r#"<[^>]+>"#).unwrap();
-    let t = re.replace_all(s, "");
-    t.replace("&quot;", "\"")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-#[cfg(test)]
-mod web_search_tests {
-    use super::*;
-
-    #[test]
-    fn urlencode_encodes_utf8() {
-        assert_eq!(urlencode("abc-_.~"), "abc-_.~");
-        assert_eq!(urlencode("a b"), "a%20b");
-        assert_eq!(urlencode("智子"), "%E6%99%BA%E5%AD%90");
-    }
-
-    #[test]
-    fn parse_bing_results_extracts_items() {
-        let html = r#"
-        <li class="b_algo">
-          <h2><a href="https://example.com/a" h="1">Rust 官方网站</a></h2>
-          <div class="b_caption"><p>一套语言 &amp; 工具链</p></div>
-        </li>
-        <li class="b_algo">
-          <h2><a href="https://example.com/b">Rust 学习教程</a></h2>
-          <div class="b_caption"><p>入门 &quot;指南&quot;</p></div>
-        </li>
-        <div class="b_pag">分页不是结果</div>
-        "#;
-        let r = parse_bing_results(html, 5);
-        assert_eq!(r.len(), 2);
-        assert_eq!(r[0].0, "Rust 官方网站");
-        assert_eq!(r[0].1, "https://example.com/a");
-        assert_eq!(r[0].2, "一套语言 & 工具链");
-        assert_eq!(r[1].2, "入门 \"指南\"");
-    }
-
-    #[test]
-    fn parse_bing_results_respects_max() {
-        let html = r#"
-        <li class="b_algo"><h2><a href="https://a">A</a></h2><p>p</p></li>
-        <li class="b_algo"><h2><a href="https://b">B</a></h2><p>p</p></li>
-        <li class="b_algo"><h2><a href="https://c">C</a></h2><p>p</p></li>
-        "#;
-        assert_eq!(parse_bing_results(html, 2).len(), 2);
-    }
-
-    #[test]
-    #[ignore] // 真实联网，需网络可用时手动跑：cargo test -p sophon-core web_search_live -- --ignored
-    fn web_search_live() {
-        let out = search_bing("rust programming language", 3).expect("联网搜索应成功");
-        assert!(out.contains("结果："));
-        assert!(out.contains("http"));
-    }
-}

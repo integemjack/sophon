@@ -32,6 +32,17 @@ impl OfflineEngine {
     }
 }
 
+/// 从文本里提取第一个 http(s) URL
+fn extract_url(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find("http://").or_else(|| lower.find("https://"))?;
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == ')' || c == '）' || c == '”' || c == '>')
+        .unwrap_or(rest.len());
+    Some(rest[..end].trim_end_matches(['.', '。', '，', ',']).to_string())
+}
+
 impl super::ChatEngine for OfflineEngine {
     fn id(&self) -> &str {
         &self.id
@@ -60,22 +71,25 @@ impl super::ChatEngine for OfflineEngine {
         let has = |name: &str| tools.contains(&name);
 
         // ── 意图路由：按关键词决定调哪个工具 ──
-        // 联网搜索（放在文件搜索之前：「搜索X」「搜一下X」优先联网；明确「搜文件/搜内容」才走本地）
+        // 自动联网调研（用户需求：根据内容自动判断 → 搜索 → 读取渲染后正文）：
+        // 实时信息 / 最新动态 / 新闻 / 查资料 → web_research 一条龙
         if (lower.contains("联网")
             || lower.contains("上网")
             || lower.contains("网上")
             || lower.contains("互联网")
             || lower.contains("搜一下")
             || lower.contains("查一下")
-            || lower.contains("搜索") && !lower.contains("文件") && !lower.contains("内容")
+            || lower.contains("调研")
+            || (lower.contains("搜索") && !lower.contains("文件") && !lower.contains("内容"))
             || lower.contains("最新")
             || lower.contains("新闻")
-            || lower.contains("web_search"))
-            && has("web_search")
+            || lower.contains("现在") && (lower.contains("多少") || lower.contains("什么情况"))
+            || lower.contains("web_research"))
+            && has("web_research")
         {
-            let query = extract_quoted(&last_user)
+            let question = extract_quoted(&last_user)
                 .or_else(|| {
-                    for kw in ["搜索", "搜一下", "查一下", "查查", "联网查", "联网搜索"] {
+                    for kw in ["搜索", "搜一下", "查一下", "查查", "调研", "联网查", "联网搜索", "帮我查"] {
                         if let Some(pos) = last_user.find(kw) {
                             let rest = last_user[pos + kw.len()..].trim();
                             if !rest.is_empty() {
@@ -88,10 +102,22 @@ impl super::ChatEngine for OfflineEngine {
                 .unwrap_or_else(|| last_user.trim().to_string());
             sink(EngineEvent::ToolCall {
                 id: crate::models::new_uuid(),
-                name: "web_search".to_string(),
-                arguments: serde_json::json!({"query": query}),
+                name: "web_research".to_string(),
+                arguments: serde_json::json!({"question": question.trim()}),
             });
             return Ok(());
+        }
+        // 打开/读取指定网址 → web_read（单页 headless 渲染读取）
+        if (lower.contains("http://") || lower.contains("https://")) && has("web_read") {
+            let url = extract_url(&last_user).unwrap_or_else(|| String::new());
+            if !url.is_empty() {
+                sink(EngineEvent::ToolCall {
+                    id: crate::models::new_uuid(),
+                    name: "web_read".to_string(),
+                    arguments: serde_json::json!({"url": url}),
+                });
+                return Ok(());
+            }
         }
         // 跑命令
         if (lower.contains("运行") || lower.contains("执行") || lower.contains("跑一下") || lower.contains("run"))
