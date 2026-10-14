@@ -1,0 +1,10 @@
+[
+  {
+    "id": "llama-local",
+    "title": "本机 llama.cpp (MiniCPM-V)",
+    "base_url": "http://127.0.0.1:8080",
+    "model": "MiniCPM-V-4.7-1B",
+    "supports_tools": false,
+    "enabled": true
+  }
+]

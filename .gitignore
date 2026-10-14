@@ -1,0 +1,24 @@
+# Rust
+/target/
+demo/target/
+
+# 截图与调试产物（保留 docs/shots/ 下的交付截图）
+*.png
+*.jpg
+!docs/shots/*.png
+dump*.json
+sophon_screen.*
+settings_dump.json
+final_home.json
+p0_dump.json
+
+# 临时输出
+test_out.txt
+single_test.txt
+*_out.txt
+*_out2.txt
+*_out3.txt
+sophon_p5_setup.bat
+
+# 历史误建目录
+%D%/

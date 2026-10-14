@@ -1,0 +1,53 @@
+[
+  {
+    "created_at" : "2026-10-14T13:58:11Z",
+    "draft" : "",
+    "id" : "6B66DBED-34B9-4D3C-8181-B2BAB0DB2464",
+    "nodes" : [
+      {
+        "blocks" : [
+          {
+            "Text" : {
+              "text" : "你好，请用一句话介绍你自己"
+            },
+            "id" : "25F7D825-A9BF-48AE-A648-FC30C8B4FC1D"
+          }
+        ],
+        "created_at" : "2026-10-14T13:58:11Z",
+        "id" : "B9D2DCDA-1DA5-436C-98A0-3533A0A434E3",
+        "role" : "User",
+        "stopped_by_user" : false
+      },
+      {
+        "blocks" : [
+          {
+            "Thinking" : {
+              "text" : "你好！我是 Hermes 桌面助理，运行在用户本机，可以帮你处理本地任务。"
+            },
+            "id" : "1C73021B-4139-4878-9093-6A4E1F12671B"
+          }
+        ],
+        "created_at" : "2026-10-14T13:58:11Z",
+        "id" : "3FFBD11F-60F3-4424-AD9F-BD96E58B2CB8",
+        "parent_id" : "B9D2DCDA-1DA5-436C-98A0-3533A0A434E3",
+        "role" : "Assistant",
+        "stats" : {
+          "engine_name" : "MiniCPM-V-4.7-1B",
+          "live" : false,
+          "prefilling" : false,
+          "prompt_token_count" : 0,
+          "token_count" : 0,
+          "tokens_per_second" : 0.0
+        },
+        "stopped_by_user" : false
+      }
+    ],
+    "permission_mode" : "auto",
+    "pinned" : false,
+    "selected_children" : {},
+    "team_mode" : "solo",
+    "title" : "新对话",
+    "updated_at" : "2026-10-14T13:58:11Z",
+    "working_directory" : "C:\\Users\\ultra\\Desktop\\works\\hermes"
+  }
+]

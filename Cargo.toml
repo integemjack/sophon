@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "crates/hermes-core",
-    "crates/hermes-app",
+    "crates/sophon-core",
+    "crates/sophon-tui",
 ]
 resolver = "2"
 

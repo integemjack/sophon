@@ -1,0 +1,251 @@
+[
+  {
+    "created_at": "2026-10-14T15:41:41Z",
+    "draft": "",
+    "id": "F29C4E75-1994-4883-9481-E7B39DD080E7",
+    "nodes": [
+      {
+        "blocks": [
+          {
+            "id": "94E75F99-72FC-4347-A98F-C84458B88392",
+            "Text": {
+              "text": "帮我读 main.rs 并搜索 TODO"
+            }
+          }
+        ],
+        "id": "8C62566F-FFB6-4E3D-A36D-75B89AF54E9B",
+        "role": "user",
+        "created_at": "2026-10-14T15:41:41Z",
+        "parent_id": null,
+        "task_note": null,
+        "folded": null,
+        "sent_by": null,
+        "stopped_by_user": false,
+        "stats": null,
+        "error": null,
+        "notice": null
+      },
+      {
+        "blocks": [
+          {
+            "id": "F0862CDF-6A4A-4DEA-93B4-4A5567AB3B5D",
+            "Thinking": {
+              "text": "先读文件，再搜索。"
+            }
+          },
+          {
+            "id": "5E52896B-E91D-46B7-8799-8EF6FDE2DF8C",
+            "Tool": {
+              "id": "8B2200E9-5C82-4356-9D64-3B366154B5DC",
+              "name": "read_file",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Succeeded",
+              "result": "fn main() { ... }",
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "9BD80D7D-E777-40CC-8713-A2CBBC661EC2",
+            "Tool": {
+              "id": "0387C1EA-9959-4B30-8160-0403CD458144",
+              "name": "search_files",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Running",
+              "result": null,
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "EC96F61F-87D6-4232-B332-98001DE17200",
+            "Tool": {
+              "id": "1B1F04A0-2115-4ED5-B0C8-A08778975412",
+              "name": "run_shell",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "AwaitingApproval",
+              "result": null,
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "30997143-AE2D-42FA-AB15-613CE157673A",
+            "Tool": {
+              "id": "1B314B1E-7169-4BAC-BBCB-D0B9F3072782",
+              "name": "write_file",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Failed",
+              "result": "权限不足",
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "8782B1C7-A89F-43F5-A879-132E64B39C3A",
+            "Tool": {
+              "id": "A90E1959-1271-4A80-A404-B21D4DDF300A",
+              "name": "find_files",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Queued",
+              "result": null,
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "6D365D09-B3F0-4651-9272-318DEE320F9C",
+            "Tool": {
+              "id": "FB3D6AAC-D538-4D42-A6A5-E4BE72C2DEC6",
+              "name": "edit_file",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Stopped",
+              "result": null,
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "1D575C98-1ADB-44B8-A19C-8424BAF4DA1F",
+            "Tool": {
+              "id": "BBE5A5F6-3CFE-49D6-94A1-8520CB023CFA",
+              "name": "read_terminal",
+              "arguments": {
+                "path": "main.rs"
+              },
+              "status": "Denied",
+              "result": null,
+              "title": null,
+              "symbol": null,
+              "preview": null,
+              "transcript": [],
+              "agent_name": null,
+              "queued": false,
+              "model_result": null,
+              "usage": {
+                "prompt_tokens": 10,
+                "generated_tokens": 5,
+                "generate_time_ms": 100,
+                "tokens_per_second": 50.0
+              },
+              "started_at": "2026-10-14T15:41:41Z",
+              "finished_at": "2026-10-14T15:41:41Z"
+            }
+          },
+          {
+            "id": "3A7C2839-922C-4393-BF77-153B633D3B08",
+            "Text": {
+              "text": "已完成：读取 main.rs（成功），搜索 TODO（运行中），运行命令（待确认），写入（失败），查找（排队），编辑（已停止），终端（已拒绝）。"
+            }
+          }
+        ],
+        "id": "779FEC98-2082-4231-B811-CAB403EA9E61",
+        "role": "assistant",
+        "created_at": "2026-10-14T15:41:41Z",
+        "parent_id": null,
+        "task_note": null,
+        "folded": null,
+        "sent_by": null,
+        "stopped_by_user": false,
+        "stats": null,
+        "error": null,
+        "notice": null
+      }
+    ],
+    "pinned": false,
+    "team_mode": "solo",
+    "title": "工具卡七态验证",
+    "updated_at": "2026-10-14T15:41:41Z",
+    "working_directory": "C:\\\\Users\\\\ultra\\\\Desktop\\\\works\\\\hermes"
+  }
+]
