@@ -1,19 +1,25 @@
-// 远程 API 清单：与核心可执行文件同目录的 remote_api.txt
-// （可用环境变量 SOPHON_REMOTE_API_FILE 覆盖路径）。
+// 远程 API 清单与提示词：固定放在桌面 sophon 目录（无论核心从哪里启动都读这里；
+// 环境变量 SOPHON_DIR 可整体换根）。核心在哪个目录运行，工作环境（产物落盘）就在哪个目录。
 //
-// 文本格式，每行一条（`#` 开头为注释行，空行忽略）：
+// 一、sophon.sub——远程 API 清单，文本格式，每行一条（`#` 注释、空行忽略）：
 //   <api地址> <api_key>              → 启动时拉取 <地址>/models，选用版本号最大的模型
 //   <api地址> <api_key> <模型名>     → 直接使用指定模型（不自动选）
-//
-// 核心启动默认从最后一行往上逐条尝试：
-//   - 拉取 /models 失败（网络 / 鉴权 / 空列表）→ 先确认这一行仍原样存在于文件中
-//     （多个核心同时运行时避免误删别的行 / 重复删），确认后才删除，再尝试上一行；
+// 启动默认从最后一行往上逐条尝试：
+//   - 拉取 /models 失败（网络 / 鉴权 / 空列表）→ 先确认这一行仍原样存在（多个核心同时
+//     运行时避免误删别的行 / 重复删），确认后才删除，再尝试上一行；
 //   - 成功 → 返回（地址, 密钥, 模型），整个启动期间只用这一条。
+//
+// 二、sophon.prompt——系统提示词：启动时不存在 → 把核心内置提示词写入该文件；
+//   存在 → 直接读它作为系统提示词（ask 对话时作为 system 消息）。
 
 use anyhow::Context;
 
-/// 清单文件名（与可执行文件同目录）
-pub const REMOTE_API_FILE_NAME: &str = "remote_api.txt";
+/// 清单与提示词文件名（都在桌面 sophon 目录下）
+pub const SUB_FILE_NAME: &str = "sophon.sub";
+pub const PROMPT_FILE_NAME: &str = "sophon.prompt";
+
+/// 核心内置提示词（首次启动写入 sophon.prompt）
+pub const DEFAULT_PROMPT: &str = "你是智子（Sophon），一个全自主智能体核心。\n职责：根据用户指令进行联网调研与信息整合（search / fetch / get / research），给出准确、简洁、有依据的回答。\n风格：先结论后依据，重要结论给出来源 URL；不编造事实，查不到就直说。";
 /// 探测 /models 的超时
 pub const MODEL_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 /// ask 对话的超时
@@ -40,20 +46,45 @@ pub struct Resolved {
     pub from_list: bool,
 }
 
-/// 清单文件路径：SOPHON_REMOTE_API_FILE 优先，否则可执行文件同目录的 remote_api.txt
-pub fn default_file() -> Option<std::path::PathBuf> {
-    if let Ok(p) = std::env::var("SOPHON_REMOTE_API_FILE") {
+/// 桌面上的 sophon 目录（SOPHON_DIR 可整体换根；与核心从哪里启动无关）
+pub fn sophon_dir() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("SOPHON_DIR") {
         if !p.trim().is_empty() {
             return Some(std::path::PathBuf::from(p));
         }
     }
-    let exe = std::env::current_exe().ok()?;
-    exe.parent().map(|d| d.join(REMOTE_API_FILE_NAME))
+    if let Some(d) = dirs::desktop_dir() {
+        return Some(d.join("sophon"));
+    }
+    dirs::home_dir().map(|h| h.join("Desktop").join("sophon"))
 }
 
-/// 供核心启动调用：清单不存在时返回 Ok(None)（联网研究等能力不受影响）
+/// 远程 API 清单路径：桌面 sophon 目录 / sophon.sub
+pub fn sub_file() -> Option<std::path::PathBuf> {
+    sophon_dir().map(|d| d.join(SUB_FILE_NAME))
+}
+
+/// 提示词文件路径：桌面 sophon 目录 / sophon.prompt
+pub fn prompt_file() -> Option<std::path::PathBuf> {
+    sophon_dir().map(|d| d.join(PROMPT_FILE_NAME))
+}
+
+/// 启动时保证提示词就绪：sophon.prompt 不存在则写入内置提示词；存在则读出来用
+pub fn ensure_prompt() -> anyhow::Result<String> {
+    let p = prompt_file().context("无法定位桌面 sophon 目录")?;
+    if p.exists() {
+        return std::fs::read_to_string(&p).with_context(|| format!("读取 {}", p.display()));
+    }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("创建 {}", parent.display()))?;
+    }
+    std::fs::write(&p, DEFAULT_PROMPT).with_context(|| format!("写入 {}", p.display()))?;
+    Ok(DEFAULT_PROMPT.to_string())
+}
+
+/// 供核心启动调用：sophon.sub 不存在时返回 Ok(None)（联网研究等能力不受影响）
 pub fn resolve_default() -> anyhow::Result<Option<Resolved>> {
-    match default_file() {
+    match sub_file() {
         None => Ok(None),
         Some(p) if !p.exists() => Ok(None),
         Some(p) => resolve(&p).map(Some),
@@ -201,12 +232,17 @@ pub fn remove_line_confirmed(path: &std::path::Path, raw: &str) -> anyhow::Resul
     Ok(true)
 }
 
-/// 非流式对话：POST {base}/chat/completions，返回首条回复文本
-pub fn chat(base_url: &str, api_key: &str, model: &str, prompt: &str, timeout: std::time::Duration) -> anyhow::Result<String> {
+/// 非流式对话：POST {base}/chat/completions，返回首条回复文本；system_prompt 非空时作为 system 消息
+pub fn chat(base_url: &str, api_key: &str, model: &str, system_prompt: &str, prompt: &str, timeout: std::time::Duration) -> anyhow::Result<String> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut messages = Vec::new();
+    if !system_prompt.trim().is_empty() {
+        messages.push(serde_json::json!({"role": "system", "content": system_prompt}));
+    }
+    messages.push(serde_json::json!({"role": "user", "content": prompt}));
     let body = serde_json::json!({
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "stream": false,
     });
     let resp = ureq::post(&url)
@@ -256,9 +292,27 @@ mod tests {
     }
 
     fn write_file(dir: &std::path::Path, text: &str) -> std::path::PathBuf {
-        let p = dir.join(REMOTE_API_FILE_NAME);
+        let p = dir.join(SUB_FILE_NAME);
         std::fs::write(&p, text).unwrap();
         p
+    }
+
+    #[test]
+    fn sophon_dir_and_prompt_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SOPHON_DIR", dir.path());
+        // 两个配置文件都定位到 SOPHON_DIR 指定的目录
+        assert_eq!(sub_file().unwrap(), dir.path().join(SUB_FILE_NAME));
+        assert_eq!(prompt_file().unwrap(), dir.path().join(PROMPT_FILE_NAME));
+        // 提示词不存在 → 写入内置提示词
+        let pf = prompt_file().unwrap();
+        assert!(!pf.exists());
+        assert_eq!(ensure_prompt().unwrap(), DEFAULT_PROMPT);
+        assert_eq!(std::fs::read_to_string(&pf).unwrap(), DEFAULT_PROMPT);
+        // 提示词已存在 → 原样读取使用，不覆盖
+        std::fs::write(&pf, "自定义提示词").unwrap();
+        assert_eq!(ensure_prompt().unwrap(), "自定义提示词");
+        std::env::remove_var("SOPHON_DIR");
     }
 
     #[test]

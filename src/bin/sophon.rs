@@ -6,8 +6,10 @@
 //   sophon get      <url> <outfile> [max_chars]
 //   sophon research <question> <max_pages> <outfile>
 //   sophon ask      <prompt>
-// 启动时读同目录 remote_api.txt（每行：<api地址> <api_key> [模型名]，详见 src/remote_api.rs）：
-// 从最后一行往上试，拉不到模型列表的行确认后在文件中删除；ask 用选出的模型对话。
+// 启动时固定读桌面 sophon 目录（SOPHON_DIR 可换根，与从哪里启动无关）：
+//   sophon.sub——远程 API 清单，从最后一行往上试，拉不到模型列表的行确认后删除；
+//   sophon.prompt——系统提示词，没有则写入内置提示词，有则读取使用；
+// 核心在哪个目录运行，工作环境（产物落盘）就在哪个目录。
 use std::time::Duration;
 
 fn main() {
@@ -16,8 +18,16 @@ fn main() {
         eprintln!("usage: sophon <search|fetch|get|research|ask> ...");
         std::process::exit(2);
     }
-    // 启动即解析远程 API 清单（与可执行文件同目录 remote_api.txt；SOPHON_REMOTE_API_FILE 可覆盖路径）：
-    // 从最后一行往上试；拉不到模型列表的行确认后从文件删除，再试上一行；全部失效则告警但不阻断联网研究。
+    // 提示词：桌面 sophon 目录的 sophon.prompt 不存在则写入内置提示词，存在则读入使用
+    let system_prompt = match sophon_core::remote_api::ensure_prompt() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("warning: {}", e);
+            String::new()
+        }
+    };
+    // 远程 API 清单：桌面 sophon 目录的 sophon.sub，从最后一行往上试；
+    // 拉不到模型列表的行确认后从文件删除，再试上一行；全部失效则告警但不阻断联网研究。
     let remote = match sophon_core::remote_api::resolve_default() {
         Ok(r) => r,
         Err(e) => {
@@ -112,7 +122,7 @@ fn main() {
         }
         "ask" => {
             let Some(api) = remote.as_ref() else {
-                eprintln!("ask 需要远程 API：请在 sophon 可执行文件同目录创建 remote_api.txt");
+                eprintln!("ask 需要远程 API：请在桌面 sophon 目录创建 sophon.sub");
                 eprintln!("每行一条：<api地址> <api_key> [模型名]（指定模型名则不自动选版本号最大者）");
                 std::process::exit(2);
             };
@@ -122,7 +132,7 @@ fn main() {
             }
             let prompt = args[2..].join(" ");
             eprintln!("ask {}（模型 {}）...", api.base_url, api.model);
-            match sophon_core::remote_api::chat(&api.base_url, &api.api_key, &api.model, &prompt, sophon_core::remote_api::CHAT_TIMEOUT) {
+            match sophon_core::remote_api::chat(&api.base_url, &api.api_key, &api.model, &system_prompt, &prompt, sophon_core::remote_api::CHAT_TIMEOUT) {
                 Ok(text) => {
                     println!("{}", text);
                     std::process::exit(0); // 直接结束，不走末尾的 "saved" 提示
