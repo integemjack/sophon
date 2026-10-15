@@ -1,4 +1,4 @@
-// 自我改进递归（SOPHON.md §6）：
+﻿// 自我改进递归（SOPHON.md §6）：
 // 发现自身缺陷 → git 分支改自身代码 → cargo build + cargo test → 全绿 → 合并 → 重新编译；
 // 任一步失败 → 回滚 + 记教训。只在 git 仓库内操作，用户可随时 git revert。
 use crate::learning::LessonStore;
@@ -189,7 +189,7 @@ pub fn run_self_improve(
 
     // 5. 验证：build + verify（测试）
     if apply_failed.is_none() {
-        let build = run_verify(repo, "cargo build --quiet", 600);
+        let build = run_verify(repo, "cargo check --quiet --workspace", 600);
         let test = run_verify(repo, verify_cmd, 900);
         match (build, test) {
             (Ok(_), Ok(_)) => {
@@ -223,7 +223,7 @@ pub fn run_self_improve(
                 report.merged = true;
                 report.steps.push(format!("已合并回 {} ✓", report.base_branch));
                 // 重新编译二进制
-                match run_verify(repo, "cargo build --quiet", 600) {
+                match run_verify(repo, "cargo check --quiet --workspace", 600) {
                     Ok(_) => report.steps.push("重新编译完成 ✓".into()),
                     Err(e) => report.notes.push(format!("合并后重新编译失败（分支已保留）：{}", one_line(&e))),
                 }
@@ -263,7 +263,7 @@ pub fn run_self_improve(
 
 /// 交付自检：构建 + 测试；Ok=全绿（runner 交付自检也用它）
 pub fn verify_only(repo: &str) -> Result<String, String> {
-    let build = run_verify(repo, "cargo build --quiet", 600)?;
+    let build = run_verify(repo, "cargo check --quiet --workspace", 600)?;
     let test = run_verify(repo, "cargo test --workspace --quiet", 900)?;
     Ok(format!("{}{}", build, test))
 }
