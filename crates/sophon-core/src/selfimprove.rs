@@ -292,8 +292,9 @@ fn rollback(repo: &str, base: &str, branch: &str, report: &mut ImproveReport) {
 fn one_line(s: &str) -> String {
     let t: String = s.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
     let t = t.trim();
-    if t.chars().count() > 100 {
-        format!("{}…", t.chars().take(97).collect::<String>())
+    // 500 字符：验证错误的关键信息常在 warning 之后，截太短会看不到真实原因
+    if t.chars().count() > 500 {
+        format!("{}…", t.chars().take(497).collect::<String>())
     } else {
         t.to_string()
     }
