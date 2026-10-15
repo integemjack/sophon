@@ -121,7 +121,7 @@ impl super::ChatEngine for OfflineEngine {
         }
         // 跑命令
         if (lower.contains("运行") || lower.contains("执行") || lower.contains("跑一下") || lower.contains("run"))
-            && has("run_shell")
+            && has("exec")
             && (lower.contains("命令") || lower.contains("cmd") || lower.contains("运行 ") || lower.contains("执行 "))
         {
             let cmd = extract_quoted(&last_user)
@@ -143,7 +143,7 @@ impl super::ChatEngine for OfflineEngine {
                 .unwrap_or_else(|| "echo hello".to_string());
             sink(EngineEvent::ToolCall {
                 id: crate::models::new_uuid(),
-                name: "run_shell".to_string(),
+                name: "exec".to_string(),
                 arguments: serde_json::json!({"command": cmd}),
             });
             return Ok(());

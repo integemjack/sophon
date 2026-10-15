@@ -12,10 +12,10 @@ use std::io::Read;
 pub struct RunShell;
 
 impl Tool for RunShell {
-    fn name(&self) -> &str { "run_shell" }
+    fn name(&self) -> &str { "exec" }
     fn title(&self) -> &str { "执行命令" }
     fn description(&self) -> &str {
-        "在 PowerShell 里执行一条命令，返回标准输出和标准错误。高危命令需要用户确认。"
+        "在沙盒内执行一条命令并返回输出。这是唯一的工具：读、写、搜、建、验都用命令完成；不锁目录，绝对路径可达任何处；沙盒内不给限制。"
     }
     fn parameters(&self) -> Value {
         json!({
@@ -27,7 +27,7 @@ impl Tool for RunShell {
             "required": ["command"]
         })
     }
-    fn needs_approval(&self, _args: &Value) -> bool { true }
+    fn needs_approval(&self, _args: &Value) -> bool { false }
     fn is_write(&self) -> bool { true }
 
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
@@ -41,11 +41,15 @@ impl Tool for RunShell {
         if command.contains(&format!("kill {}", me)) || command.contains(&me.to_string()) && (command.contains("taskkill") || command.contains("kill")) {
             return ToolOutput::Err("拒绝执行：这条命令会结束 Sophon 自己。".to_string());
         }
-        let cwd = ctx.working_directory.clone();
+        let (cwd, sb_env) = match &ctx.sandbox {
+            // 命令默认落在沙盒内（九条准则）
+            Some(sb) => (sb.root.to_string_lossy().to_string(), sb.env_pairs()),
+            None => (ctx.working_directory.clone(), Vec::new()),
+        };
         let cancel = ctx.cancel.clone();
         // 在工作线程里阻塞执行（不持全局锁）
         let result = std::thread::spawn(move || {
-            run_command(&command, &cwd, timeout, &cancel)
+            run_command(&command, &cwd, timeout, &cancel, &sb_env)
         }).join();
         match result {
             Ok(Ok((out, code))) => {
@@ -66,7 +70,9 @@ impl Tool for RunShell {
     }
 }
 
-fn run_command(command: &str, cwd: &str, timeout: u64, cancel: &CancelToken) -> anyhow::Result<(String, i32)> {
+pub fn run_command(command: &str, cwd: &str, timeout: u64, cancel: &CancelToken,
+    env_pairs: &[(String, String)],
+) -> anyhow::Result<(String, i32)> {
     use std::process::Command;
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("powershell.exe");
@@ -78,6 +84,10 @@ fn run_command(command: &str, cwd: &str, timeout: u64, cancel: &CancelToken) -> 
         c
     };
     cmd.current_dir(cwd);
+    // 沙盒环境变量：命令行再运行自身时自动落回沙盒内
+    for (k, v) in env_pairs {
+        cmd.env(k, v);
+    }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     cmd.stdin(std::process::Stdio::null());
@@ -87,6 +97,7 @@ fn run_command(command: &str, cwd: &str, timeout: u64, cancel: &CancelToken) -> 
     // 轮询等待，支持取消与超时
     loop {
         if cancel.is_cancelled() {
+            let _ = crate::sandbox::kill_tree(child.id());
             let _ = child.kill();
             return Ok(("（已停止）".to_string(), -1));
         }
@@ -113,6 +124,7 @@ fn run_command(command: &str, cwd: &str, timeout: u64, cancel: &CancelToken) -> 
             }
             None => {
                 if start.elapsed() >= timeout_dur {
+                    let _ = crate::sandbox::kill_tree(child.id());
                     let _ = child.kill();
                     return Ok((format!("（超时 {} 秒，已终止）", timeout), -1));
                 }
@@ -703,7 +715,8 @@ impl Tool for DelegateTask {
                 engine: engine_w.clone(),
                 secrets: secrets_w,
                 system_prompt: system_prompt_w,
-            };
+                sandbox: None,
+        };
             crate::agent::team::run_subagent(&run_id_w, &profile_w, &task_w, &engine_w, &mut sub_ctx)
         };
         if background {
@@ -806,7 +819,8 @@ impl Tool for RunParallelTasks {
                     engine: engine.clone(),
                     secrets: secrets.clone(),
                     system_prompt: system_prompt.clone(),
-                };
+                    sandbox: None,
+        };
                 let result = crate::agent::team::run_subagent(&run_id2, &profile, &task_text, &engine, &mut sub_ctx);
                 let mut t = team.lock();
                 t.finish_run(&run_id2, result.clone());
@@ -971,7 +985,8 @@ impl Tool for ReworkAgent {
                 engine: engine.clone(),
                 secrets: secrets.clone(),
                 system_prompt: system_prompt.clone(),
-            };
+                sandbox: None,
+        };
             let result = crate::agent::team::run_subagent(&run_id2, &profile, &new_task, &engine, &mut sub_ctx);
             let mut t = team2.lock();
             t.finish_run(&run_id2, result.clone());

@@ -7,13 +7,13 @@
 > 旧文档（ARCHITECTURE / ASSISTANT / REMOTE / TERMINAL / STYLE / POWERS / PORT_*）保留为**功能规格参考**：
 > 它们描述 Friday 的功能与行为，智子继承其功能集，但界面层一律换成 TUI，部署层去掉远程/助手主机等桌面端概念。
 >
-> **2026-10-15 更新**：按用户要求移除 TUI 界面层，`crates/sophon-tui` 已删除，仅保留 `sophon-core` 核心与 `webcli`（联网研究 CLI）；本文涉及 TUI 的段落已相应修改，TUI 历史实现见 git 历史。
+> **2026-10-15 更新**：按用户要求移除 TUI 界面层，`crates/sophon-tui` 已删除，仅保留 `sophon-core` 核心与 `sophon`（联网研究 CLI，原 webcli）；本文涉及 TUI 的段落已相应修改，TUI 历史实现见 git 历史。
 
 ---
 
 ## 0. 核心定义
 
-1. **无内置界面**：核心库不绑定任何界面（原 egui 桌面端、后补的 TUI 均已移除）；通过库调用与 webcli 使用，界面可按需另行实现。
+1. **无内置界面**：核心库不绑定任何界面（原 egui 桌面端、后补的 TUI 均已移除）；通过库调用与 sophon 命令行使用，界面可按需另行实现。
 2. **全自主**：默认自主执行——遇到问题自己想办法解决（重试、换方案、找替代路径、自愈），
    不把「接下来怎么做」推回给用户，直到成功交付。安全底线见 §4（不可逆破坏操作保留确认闸）。
 3. **自我学习递归**：交付过程中持续学习——经验库记录「问题→尝试→结果→教训」，下次同类问题直接套用；
@@ -42,7 +42,7 @@
 
 - **hermes-core 本来就无界面**（README：「无界面核心」），与 egui 零耦合 → 整体保留复用，只做包名/路径的机械改名。
 - **界面层全部移除**：hermes-app（egui/eframe 桌面端）按新定义移除；其后实现的 sophon-tui（crossterm + ratatui）已于 2026-10-15 按用户要求删除。
-- 对外形态：Rust 库 `sophon_core` + `webcli` 命令行（联网搜索 / 抓取 / 调研，见 `src/bin/webcli.rs`）；回合线程模型不变，事件流可接任何上层程序。
+- 对外形态：Rust 库 `sophon_core` + `sophon` 命令行（联网搜索 / 抓取 / 调研，见 `src/bin/sophon.rs`）；回合线程模型不变，事件流可接任何上层程序。
 
 ---
 
@@ -182,7 +182,7 @@ crates/sophon-core/        （= 现有 hermes-core，GUI 无关，整体复用�
   src/selfimprove.rs       【新】自我改进：分支 / 改码 / 构建测试 / 合并 / 回滚
 
   src/web.rs               联网能力：搜索引擎结果页抓取 + headless Edge 渲染（零安装，用本机 Edge/Chrome）
-  src/bin/webcli.rs        webcli 命令行入口：search / fetch / get / research
+  src/bin/sophon.rs        sophon 命令行入口：search / fetch / get / research
 ```
 
 ---

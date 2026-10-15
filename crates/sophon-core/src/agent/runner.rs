@@ -254,6 +254,12 @@ impl AgentRunner {
         };
 
         let mut messages = history;
+        // 沙盒（准则）：命令与快照都圈在沙盒内
+        let sandbox: Option<std::sync::Arc<crate::sandbox::Sandbox>> = core.lock().sandbox.clone();
+        // 回滚（准则）：每个任务开始前自动打快照；对话里发「回滚」可撤销整个任务
+        if let Some(sb) = &sandbox {
+            let _ = crate::rollback::checkpoint(&sb.root, "任务开始");
+        }
         // P4 自我学习：新任务开始前检索经验库，相关教训拼进系统提示
         let system_prompt_full = {
             let guard = lessons.lock();
@@ -268,7 +274,7 @@ impl AgentRunner {
         let mut tool_events: Vec<(String, String, ToolStatus, Option<String>, Option<String>)> = Vec::new();
         let mut wrote_something = false;
         let mut delivery_rounds = 0;
-        let max_rounds = 30;
+        let max_rounds = 200; // 单一指令：只能完成，给足轮数
         let mut round = 0;
 
         // 工具上下文
@@ -284,6 +290,7 @@ impl AgentRunner {
             engine: engine.clone(),
             secrets: secrets.clone(),
             system_prompt: system_prompt.clone(),
+            sandbox: sandbox.clone(),
         };
 
         loop {
@@ -308,6 +315,7 @@ impl AgentRunner {
             }
 
             // 构造请求
+            crate::context_compress::compress_if_needed(&mut messages); // 自动压缩上下文
             let req = StreamRequest {
                 system: system_prompt_full.clone(),
                 messages: messages.clone(),
@@ -468,7 +476,7 @@ impl AgentRunner {
                 let mut autonomy_note: Option<String> = None;
                 let mut deny_reason: Option<String> = None;
                 let mut confirm_reason: Option<String> = None;
-                if name == "run_shell" {
+                if name == "exec" {
                     let cmd = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
                     match crate::autonomy::check_shell_command(cmd, autonomy_mode, &working_directory) {
                         crate::autonomy::Decision::Deny(r) => deny_reason = Some(r),
@@ -607,7 +615,8 @@ impl AgentRunner {
                         engine: engine.clone(),
                         secrets: secrets.clone(),
                         system_prompt: system_prompt.clone(),
-                    };
+                        sandbox: sandbox.clone(),
+        };
                     registry.execute(name, &effective_args, &mut ctx)
                 };
 
@@ -726,7 +735,7 @@ fn truncate_text(s: &str, max_chars: usize) -> String {
 }
 
 /// 是否在 cargo test 环境里：测试二进制都放在 target/*/deps/ 下，
-/// 真实二进制（如 target/debug/webcli.exe）不在 deps 里。用这个区分，避免递归构建锁死 target。
+/// 真实二进制（如 target/debug/sophon.exe）不在 deps 里。用这个区分，避免递归构建锁死 target。
 fn in_cargo_test() -> bool {
     std::env::current_exe()
         .ok()

@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-mod builtin;
+pub mod builtin;
 pub use builtin::*;
 
 /// 工具执行上下文（工作线程持有；共享状态用各自的锁，不长期持全局锁）
@@ -28,6 +28,8 @@ pub struct ToolContext {
     pub engine: Arc<dyn ChatEngine>,
     pub secrets: Arc<Mutex<SecretStore>>,
     pub system_prompt: String,
+    /// 沙盒：命令必须在沙盒内跑；None = 直跑
+    pub sandbox: Option<std::sync::Arc<crate::sandbox::Sandbox>>,
 }
 
 #[derive(Debug)]
@@ -81,32 +83,8 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     pub fn builtin() -> Self {
         let tools: Vec<Box<dyn Tool>> = vec![
+            // 仅保留 exec：文件/搜索/构建等一切操作都用命令在沙盒内完成
             Box::new(builtin::RunShell),
-            Box::new(builtin::ReadFile),
-            Box::new(builtin::WriteFile),
-            Box::new(builtin::EditFile),
-            Box::new(builtin::FindFiles),
-            Box::new(builtin::SearchFiles),
-            Box::new(builtin::SearchKeywords),
-            Box::new(builtin::ReadTerminal),
-            Box::new(builtin::RunInTerminal),
-            Box::new(builtin::UpdateTaskState),
-            Box::new(builtin::DelegateTask),
-            Box::new(builtin::RunParallelTasks),
-            Box::new(builtin::MessageAgent),
-            Box::new(builtin::StopAgent),
-            Box::new(builtin::WaitAgents),
-            Box::new(builtin::ReworkAgent),
-            Box::new(builtin::ReadAgentLog),
-            Box::new(builtin::ListTools),
-            Box::new(builtin::GetCurrentTime),
-            Box::new(builtin::WebSearch),
-            Box::new(builtin::WebRead),
-            Box::new(builtin::WebResearch),
-            Box::new(builtin::AnalyzeImage),
-            Box::new(builtin::GenerateImage),
-            Box::new(builtin::TranscribeAudio),
-            Box::new(builtin::Speak),
         ];
         ToolRegistry { tools }
     }

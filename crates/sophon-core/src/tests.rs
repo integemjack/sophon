@@ -80,8 +80,8 @@ fn test_models() {
     // 文本内容
     assert_eq!(m1.text_content(), "你好");
     // 工具事件
-    let ev = ToolEvent::new("run_shell", json!({"command": "ls"}), Some("运行命令".to_string()));
-    assert_eq!(ev.name, "run_shell");
+    let ev = ToolEvent::new("exec", json!({"command": "ls"}), Some("运行命令".to_string()));
+    assert_eq!(ev.name, "exec");
     assert_eq!(ev.status, ToolStatus::Running);
     assert_eq!(ev.arguments["command"], "ls");
 }
@@ -171,7 +171,7 @@ fn tool_desc(name: &str) -> ToolDescriptor {
 fn test_offline_engine_routes_tools() {
     let engine = OfflineEngine::new();
     let tools = vec![
-        tool_desc("run_shell"),
+        tool_desc("exec"),
         tool_desc("find_files"),
         tool_desc("read_file"),
         tool_desc("write_file"),
@@ -203,7 +203,7 @@ fn test_offline_engine_routes_tools() {
     engine.stream(&offline_req("运行命令 echo 你好", tools.clone()), &mut |e| events.push(e)).unwrap();
     match &events[0] {
         EngineEvent::ToolCall { name, arguments, .. } => {
-            assert_eq!(name, "run_shell");
+            assert_eq!(name, "exec");
             assert_eq!(arguments["command"], "echo 你好");
         }
         _ => panic!("应路由到 run_shell"),
@@ -220,7 +220,7 @@ fn test_offline_engine_routes_tools() {
 #[test]
 fn test_offline_engine_answers_questions() {
     let engine = OfflineEngine::new();
-    let tools = vec![tool_desc("run_shell")];
+    let tools = vec![tool_desc("exec")];
     // 问候 → 文本流 + Done
     let mut events = Vec::new();
     engine.stream(&offline_req("你好", tools), &mut |e| events.push(e)).unwrap();
@@ -278,6 +278,7 @@ fn test_context(workdir: &str) -> ToolContext {
     let dir = tempfile::tempdir().unwrap();
     let secrets = SecretStore::load(&dir.path().join("secrets.json"));
     ToolContext {
+        sandbox: None,
         working_directory: workdir.to_string(),
         conversation_id: "test-conv".to_string(),
         terminal_manager: Arc::new(Mutex::new(TerminalManager::new())),
@@ -296,7 +297,7 @@ fn test_context(workdir: &str) -> ToolContext {
 fn test_tool_run_shell() {
     let mut ctx = test_context(".");
     let reg = ToolRegistry::builtin();
-    let out = reg.execute("run_shell", &json!({"command": "echo sophon-test"}), &mut ctx);
+    let out = reg.execute("exec", &json!({"command": "echo sophon-test"}), &mut ctx);
     match out {
         ToolOutput::Ok(s) => assert!(s.contains("sophon-test"), "输出应含 sophon-test: {}", s),
         ToolOutput::Err(e) => panic!("run_shell 失败: {}", e),
@@ -304,59 +305,52 @@ fn test_tool_run_shell() {
 }
 
 #[test]
-fn test_tool_read_write_edit_file() {
+fn test_tool_exec_read_write_files() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test.txt");
-    let file_str = file.to_string_lossy().to_string();
+    let file = dir.path().join("sophon_exec_test.txt");
+    let p = file.to_string_lossy().replace('\\', "/");
     let mut ctx = test_context(dir.path().to_string_lossy().as_ref());
     let reg = ToolRegistry::builtin();
-    // 写文件
-    let out = reg.execute("write_file", &json!({"path": &file_str, "content": "第一行\n第二行\n"}), &mut ctx);
-    assert!(out.is_ok(), "write_file 应成功: {:?}", out);
+    // 写文件（exec 命令）
+    let out = reg.execute("exec", &json!({"command": format!("Set-Content -LiteralPath '{}' -Value 'hello-sophon'", p)}), &mut ctx);
+    assert!(matches!(out, ToolOutput::Ok(_)), "exec 写文件应成功: {:?}", out);
     assert!(file.exists());
-    // 读文件
-    let out = reg.execute("read_file", &json!({"path": &file_str}), &mut ctx);
+    // 读文件（exec 命令）
+    let out = reg.execute("exec", &json!({"command": format!("Get-Content -LiteralPath '{}'", p)}), &mut ctx);
     match out {
-        ToolOutput::Ok(s) => assert!(s.contains("第一行"), "读回应含内容: {}", s),
-        ToolOutput::Err(e) => panic!("read_file 失败: {}", e),
+        ToolOutput::Ok(s) => assert!(s.contains("hello-sophon"), "exec 读回应含内容: {}", s),
+        ToolOutput::Err(e) => panic!("exec 读文件失败: {}", e),
     }
-    // 编辑文件
-    let out = reg.execute("edit_file", &json!({"path": &file_str, "old_text": "第一行", "new_text": "首行"}), &mut ctx);
-    assert!(out.is_ok(), "edit_file 应成功: {:?}", out);
+    // 追加编辑（exec 命令）
+    let out = reg.execute("exec", &json!({"command": format!("Add-Content -LiteralPath '{}' -Value 'line2'", p)}), &mut ctx);
+    assert!(matches!(out, ToolOutput::Ok(_)), "exec 追加应成功: {:?}", out);
     let content = std::fs::read_to_string(&file).unwrap();
-    assert!(content.contains("首行"), "编辑后应含首行: {}", content);
-    assert!(!content.contains("第一行"), "编辑后不应含旧文本");
+    assert!(content.contains("hello-sophon") && content.contains("line2"));
 }
 
 #[test]
-fn test_tool_find_and_search() {
+fn test_tool_exec_find_and_search() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.rs"), "fn main() {}\n").unwrap();
     std::fs::write(dir.path().join("b.rs"), "let x = 1;\n").unwrap();
     std::fs::write(dir.path().join("c.toml"), "[package]\n").unwrap();
     let mut ctx = test_context(dir.path().to_string_lossy().as_ref());
     let reg = ToolRegistry::builtin();
-    // 找文件
-    let out = reg.execute("find_files", &json!({"pattern": "*.rs", "path": "."}), &mut ctx);
+    // 找文件（exec 命令）
+    let out = reg.execute("exec", &json!({"command": "Get-ChildItem -Filter *.rs | ForEach-Object { $_.Name }"}), &mut ctx);
     match out {
         ToolOutput::Ok(s) => {
             assert!(s.contains("a.rs"), "应找到 a.rs: {}", s);
             assert!(s.contains("b.rs"), "应找到 b.rs: {}", s);
             assert!(!s.contains("c.toml"), "不应找到 c.toml");
         }
-        ToolOutput::Err(e) => panic!("find_files 失败: {}", e),
+        ToolOutput::Err(e) => panic!("exec 找文件失败: {}", e),
     }
-    // 内容搜索
-    let out = reg.execute("search_files", &json!({"pattern": "fn main", "path": "."}), &mut ctx);
+    // 内容搜索（exec 命令）
+    let out = reg.execute("exec", &json!({"command": "Select-String -Path *.rs -Pattern 'fn main'"}), &mut ctx);
     match out {
         ToolOutput::Ok(s) => assert!(s.contains("a.rs"), "应搜到 a.rs: {}", s),
-        ToolOutput::Err(e) => panic!("search_files 失败: {}", e),
-    }
-    // 关键词搜索
-    let out = reg.execute("search_keywords", &json!({"keywords": "let x", "path": "."}), &mut ctx);
-    match out {
-        ToolOutput::Ok(s) => assert!(s.contains("b.rs"), "应搜到 b.rs: {}", s),
-        ToolOutput::Err(e) => panic!("search_keywords 失败: {}", e),
+        ToolOutput::Err(e) => panic!("exec 内容搜索失败: {}", e),
     }
 }
 
@@ -622,6 +616,7 @@ fn test_analyze_image_builds_vision_request() {
     let engine = Arc::new(MockEngine { last: Mutex::new(None) });
     let (main_thread, _rx) = crate::util::main_thread::channel();
     let mut ctx = ToolContext {
+            sandbox: None,
         working_directory: String::new(),
         conversation_id: String::new(),
         terminal_manager: Arc::new(Mutex::new(TerminalManager::new())),

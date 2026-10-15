@@ -7,7 +7,7 @@
 
 - `sophon-core`：无界面核心库——会话、引擎、Agent、工具、终端、MCP、
   自主策略、经验库、自我改进、沙盒 / 压缩 / 回滚 / 自检、联网能力。
-- `webcli`：联网研究命令行（`crates/sophon-core/src/bin/webcli.rs`）。
+- `sophon`：联网研究命令行（`crates/sophon-core/src/bin/sophon.rs`）。
 
 ## 功能
 
@@ -50,15 +50,15 @@ $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
 cargo build --release
 ```
 
-产物：`target/release/webcli.exe`（核心是库 `sophon_core`，供上层程序链接）。
+产物：`target/release/sophon.exe`（核心是库 `sophon_core`，供上层程序链接）。
 
-## webcli 用法
+## sophon 用法
 
 ```text
-webcli search   <bing|baidu> <query> <count> <outfile>
-webcli fetch    <url> <outfile> [max_chars] [timeout_secs] [virtual_ms]
-webcli get      <url> <outfile> [max_chars]
-webcli research <question> <max_pages> <outfile>
+sophon search   <bing|baidu> <query> <count> <outfile>
+sophon fetch    <url> <outfile> [max_chars] [timeout_secs] [virtual_ms]
+sophon get      <url> <outfile> [max_chars]
+sophon research <question> <max_pages> <outfile>
 ```
 
 搜索结果与页面正文以 Markdown 形式落盘为证据文件（UTF-8）。

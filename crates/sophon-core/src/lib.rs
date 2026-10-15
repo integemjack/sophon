@@ -12,6 +12,10 @@ pub mod remote;
 pub mod autonomy;
 pub mod learning;
 pub mod selfimprove;
+pub mod sandbox;
+pub mod context_compress;
+pub mod rollback;
+pub mod selfcheck;
 pub mod web;
 
 pub use models::*;

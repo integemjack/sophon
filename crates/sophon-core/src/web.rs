@@ -75,6 +75,9 @@ pub fn fetch_rendered(url: &str, virtual_time_ms: u32, timeout: Duration) -> Res
         "找不到 Edge/Chrome 浏览器（headless 渲染需要）。可设环境变量 SOPHON_BROWSER 指向浏览器路径".to_string()
     })?;
     let mut cmd = std::process::Command::new(browser);
+    // 固定 user-data-dir：免每次冷启动初始化 profile（实测冷启动 ~9s，热启动 ~2-4s）
+    let profile = std::env::temp_dir().join("sophon_edge_profile");
+    let _ = std::fs::create_dir_all(&profile);
     cmd.args([
         "--headless=new",
         "--disable-gpu",
@@ -82,6 +85,7 @@ pub fn fetch_rendered(url: &str, virtual_time_ms: u32, timeout: Duration) -> Res
         "--disable-extensions",
         "--mute-audio",
         "--no-sandbox",
+        &format!("--user-data-dir={}", profile.display()),
         &format!("--virtual-time-budget={}", virtual_time_ms),
         &format!(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
