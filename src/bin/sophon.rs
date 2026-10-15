@@ -133,16 +133,61 @@ fn main() {
             }
             let prompt = args[2..].join(" ");
             eprintln!("ask {}（模型 {}）...", api.base_url, api.model);
-            match sophon_core::remote_api::chat(&api.base_url, &api.api_key, &api.model, &system_prompt, &prompt, sophon_core::remote_api::CHAT_TIMEOUT) {
-                Ok(text) => {
-                    println!("{}", text);
-                    std::process::exit(0); // 直接结束，不走末尾的 "saved" 提示
-                }
+            // 注入清单文件路径与追加协议：模型输出 <SOPHON_APPEND> 标记，本机验证后自动入库
+            let sys = match sophon_core::remote_api::sub_file() {
+                Some(pf) => format!(
+                    "{}\n{}",
+                    system_prompt,
+                    sophon_core::remote_api::append_tool_note(&pf.display().to_string())
+                ),
+                None => system_prompt,
+            };
+            use std::io::Write as _;
+            // 流式：每收到一段立即打印（思考与正文都实时可见），完成后解析标记入库
+            let full = match sophon_core::remote_api::chat_stream(
+                &api.base_url,
+                &api.api_key,
+                &api.model,
+                &sys,
+                &prompt,
+                sophon_core::remote_api::CHAT_TIMEOUT,
+                &mut |t, _reasoning| {
+                    print!("{}", t);
+                    let _ = std::io::stdout().flush();
+                },
+            ) {
+                Ok(t) => t,
                 Err(e) => {
-                    eprintln!("ask failed: {}", e);
+                    eprintln!("\nask failed: {}", e);
                     std::process::exit(1);
                 }
+            };
+            println!();
+            let marks = sophon_core::remote_api::parse_append_marks(&full);
+            if !marks.is_empty() {
+                eprintln!("--- 远程 API 入库 ---");
+                if let Some(pf) = sophon_core::remote_api::sub_file() {
+                    let results = sophon_core::remote_api::append_verified(
+                        &pf,
+                        &marks,
+                        sophon_core::remote_api::MODEL_PROBE_TIMEOUT,
+                    );
+                    for (m, r) in &results {
+                        match r {
+                            sophon_core::remote_api::AppendOutcome::Added => {
+                                eprintln!("已验证并追加：{}", m)
+                            }
+                            sophon_core::remote_api::AppendOutcome::Exists => {
+                                eprintln!("已存在，跳过：{}", m)
+                            }
+                            sophon_core::remote_api::AppendOutcome::Rejected(reason) => {
+                                eprintln!("未追加（{}）：{}", reason, m)
+                            }
+                        }
+                    }
+                }
             }
+            std::process::exit(0); // 直接结束，不走末尾的 "saved" 提示
         }
         "tools" => {
             use sophon_core::tools::Tool;
