@@ -16,7 +16,7 @@ use std::time::Duration;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: sophon <search|fetch|get|research|ask|tools> ...");
+        eprintln!("usage: sophon <search|fetch|get|research|ask|run|tools> ...");
         std::process::exit(2);
     }
     // 提示词：桌面 sophon 目录的 sophon.prompt 不存在则写入内置提示词，存在则读入使用
@@ -188,6 +188,66 @@ fn main() {
                 }
             }
             std::process::exit(0); // 直接结束，不走末尾的 "saved" 提示
+        }
+
+        "run" => {
+            let Some(api) = remote.as_ref() else {
+                eprintln!("run 需要远程 API：请在桌面 sophon 目录的 sophon.sub 配置（每行：<api地址> <api_key> [模型名]）");
+                std::process::exit(2);
+            };
+            if args.len() < 3 {
+                eprintln!("usage: sophon run <任务描述> [--rounds N]");
+                std::process::exit(2);
+            }
+            // --rounds N：最大执行轮数（默认 12）
+            let mut max_rounds = 12u32;
+            let mut goal_parts: Vec<&str> = Vec::new();
+            let mut skip = false;
+            for (i, a) in args[2..].iter().enumerate() {
+                if skip { skip = false; continue; }
+                if a == "--rounds" {
+                    max_rounds = args[3 + i].parse().unwrap_or(12);
+                    skip = true;
+                    continue;
+                }
+                goal_parts.push(a);
+            }
+            let goal = goal_parts.join(" ");
+            // 沙盒：一切命令与产物都落这里（嵌套时自动落到父沙盒 sub/ 下）
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let sandbox = sophon_core::sandbox::Sandbox::resolve(&cwd);
+            eprintln!("沙盒：{}", sandbox.root.display());
+            eprintln!("目标：{}（最多 {} 轮）", goal, max_rounds);
+            let cfg = sophon_core::agent_loop::LoopConfig { max_rounds, ..Default::default() };
+            let append_note = match sophon_core::remote_api::sub_file() {
+                Some(pf) => sophon_core::remote_api::append_tool_note(&pf.display().to_string()),
+                None => String::new(),
+            };
+            match sophon_core::agent_loop::run_task(&goal, api, &system_prompt, &cfg, &sandbox, &append_note) {
+                Ok(o) => {
+                    eprintln!("═══ 结果 ═══");
+                    eprintln!(
+                        "{}（{} 轮 / {} 个动作）",
+                        if o.ok { "✓ 完成" } else { "✗ 未完成" },
+                        o.rounds_used,
+                        o.steps
+                    );
+                    eprintln!("{}", o.summary);
+                    for it in &o.verify_items {
+                        eprintln!(
+                            "  {} {}{}",
+                            if it.ok { "✓" } else { "✗" },
+                            it.item,
+                            if it.note.is_empty() { String::new() } else { format!("（{}）", it.note) }
+                        );
+                    }
+                    std::process::exit(if o.ok { 0 } else { 1 });
+                }
+                Err(e) => {
+                    eprintln!("run failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
         "tools" => {
             use sophon_core::tools::Tool;

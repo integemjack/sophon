@@ -18,6 +18,7 @@ pub mod context_compress;
 pub mod rollback;
 pub mod selfcheck;
 pub mod web;
+pub mod agent_loop;
 
 pub use models::*;
 pub use util::{CancelToken, MainThread, Paths};
