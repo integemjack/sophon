@@ -59,9 +59,26 @@ sophon search   <bing|baidu> <query> <count> <outfile>
 sophon fetch    <url> <outfile> [max_chars] [timeout_secs] [virtual_ms]
 sophon get      <url> <outfile> [max_chars]
 sophon research <question> <max_pages> <outfile>
+sophon ask      <prompt>
 ```
 
 搜索结果与页面正文以 Markdown 形式落盘为证据文件（UTF-8）。
+
+## 远程 API 清单（remote_api.txt）
+
+与 `sophon` 可执行文件**同目录**的 `remote_api.txt`（路径可用环境变量
+`SOPHON_REMOTE_API_FILE` 覆盖）是远程 LLM API 的清单。文本格式，每行一条：
+
+```text
+<api地址> <api_key>            # 启动时拉取 <地址>/models，自动选用版本号最大的模型
+<api地址> <api_key> <模型名>   # 直接使用行内指定的模型（不自动选）
+# 注释行与空行忽略；版本号取模型名里第一段 数字[.数字]*（qwen3-32b 只取 3，不把参数量 32 当版本）
+```
+
+核心启动默认从**最后一行**往上逐条尝试：拉得到模型列表就用（未指定模型名时取
+版本号最大者）；拉不到的行（网络 / 鉴权 / 空列表）**先确认这一行仍原样存在**
+（多个核心同时运行时避免误删别的行），确认后才从文件中删除，再试上一行。
+`ask` 子命令用选出的地址 / 密钥 / 模型做一次对话。
 
 ## 测试
 
@@ -106,6 +123,7 @@ cargo test -p sophon-core
 
 ## 约束
 
-- 引擎地址限本机（127.0.0.1 / localhost），不调任何云端 API。
+- 内置 OpenAI 兼容引擎（OpenAICompatEngine）地址限本机（127.0.0.1 / localhost）；
+  云端 LLM 走用户显式配置的 remote_api.txt（见上），两者互不影响。
 - 联网抓取用本机浏览器 headless，不引第三方下载。
 - 界面层已移除；需要界面时可基于 core 的事件流另行实现。

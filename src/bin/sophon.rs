@@ -5,13 +5,28 @@
 //   sophon fetch    <url> <outfile> [max_chars]
 //   sophon get      <url> <outfile> [max_chars]
 //   sophon research <question> <max_pages> <outfile>
+//   sophon ask      <prompt>
+// 启动时读同目录 remote_api.txt（每行：<api地址> <api_key> [模型名]，详见 src/remote_api.rs）：
+// 从最后一行往上试，拉不到模型列表的行确认后在文件中删除；ask 用选出的模型对话。
 use std::time::Duration;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: sophon <search|fetch|get|research> ...");
+        eprintln!("usage: sophon <search|fetch|get|research|ask> ...");
         std::process::exit(2);
+    }
+    // 启动即解析远程 API 清单（与可执行文件同目录 remote_api.txt；SOPHON_REMOTE_API_FILE 可覆盖路径）：
+    // 从最后一行往上试；拉不到模型列表的行确认后从文件删除，再试上一行；全部失效则告警但不阻断联网研究。
+    let remote = match sophon_core::remote_api::resolve_default() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("warning: {}", e);
+            None
+        }
+    };
+    if let Some(r) = &remote {
+        eprintln!("remote api: {} | 模型: {}（{}）", r.base_url, r.model, if r.from_list { "清单内版本号最大" } else { "行内指定" });
     }
     let r = match args[1].as_str() {
         "search" => {
@@ -91,6 +106,29 @@ fn main() {
                 Ok(text) => write_out(outfile, &text),
                 Err(e) => {
                     eprintln!("research failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "ask" => {
+            let Some(api) = remote.as_ref() else {
+                eprintln!("ask 需要远程 API：请在 sophon 可执行文件同目录创建 remote_api.txt");
+                eprintln!("每行一条：<api地址> <api_key> [模型名]（指定模型名则不自动选版本号最大者）");
+                std::process::exit(2);
+            };
+            if args.len() < 3 {
+                eprintln!("usage: sophon ask <prompt>");
+                std::process::exit(2);
+            }
+            let prompt = args[2..].join(" ");
+            eprintln!("ask {}（模型 {}）...", api.base_url, api.model);
+            match sophon_core::remote_api::chat(&api.base_url, &api.api_key, &api.model, &prompt, sophon_core::remote_api::CHAT_TIMEOUT) {
+                Ok(text) => {
+                    println!("{}", text);
+                    std::process::exit(0); // 直接结束，不走末尾的 "saved" 提示
+                }
+                Err(e) => {
+                    eprintln!("ask failed: {}", e);
                     std::process::exit(1);
                 }
             }

@@ -9,6 +9,7 @@ pub mod tools;
 pub mod assistant;
 pub mod mcp;
 pub mod remote;
+pub mod remote_api;
 pub mod autonomy;
 pub mod learning;
 pub mod selfimprove;
