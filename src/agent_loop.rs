@@ -170,12 +170,8 @@ pub fn exec_in_sandbox(
     sandbox: &Sandbox,
     timeout: std::time::Duration,
 ) -> (bool, String) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/C", command])
-        .current_dir(&sandbox.root)
-        .creation_flags(CREATE_NO_WINDOW)
+    let mut cmd = shell_command(command);
+    cmd.current_dir(&sandbox.root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     for (k, v) in sandbox.env_pairs() {
@@ -307,6 +303,25 @@ pub fn execute_call(
             }
         }
         other => (false, format!("未知工具：{}", other)),
+    }
+}
+
+/// 跨平台 shell 命令：Windows 用 cmd /C（CREATE_NO_WINDOW 防闪黑框）；Unix 用 sh -c
+fn shell_command(command: &str) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", command]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg(command);
+        cmd
     }
 }
 
