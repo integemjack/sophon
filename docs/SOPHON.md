@@ -167,7 +167,7 @@
 ## 7. 模块组织
 
 ```
-crates/sophon-core/        （= 现有 hermes-core，GUI 无关，整体复用；机械改名）
+(仓库根)                   （= 现有 hermes-core，GUI 无关，整体复用；机械改名）
   src/models.rs            数据模型（与 docs JSON 同构）
   src/store.rs             会话库 / 设置 / 密钥库 / 引擎库 / AppCore
   src/engine/              ChatEngine 接口 + 离线引擎 + 本机 OpenAI 兼容引擎

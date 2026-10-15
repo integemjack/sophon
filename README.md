@@ -7,7 +7,7 @@
 
 - `sophon-core`：无界面核心库——会话、引擎、Agent、工具、终端、MCP、
   自主策略、经验库、自我改进、沙盒 / 压缩 / 回滚 / 自检、联网能力。
-- `sophon`：联网研究命令行（`crates/sophon-core/src/bin/sophon.rs`）。
+- `sophon`：联网研究命令行（`src/bin/sophon.rs`）。
 
 ## 功能
 
@@ -77,7 +77,7 @@ cargo test -p sophon-core
 ## 结构
 
 ```
-crates/sophon-core/   无界面核心
+(仓库根)              无界面核心
   src/models.rs           数据模型
   src/store/mod.rs        会话库 / 设置 / 密钥库 / 引擎库 / AppCore
   src/engine/             ChatEngine 接口 + 离线引擎 + 本机 OpenAI 兼容引擎
