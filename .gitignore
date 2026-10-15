@@ -25,3 +25,6 @@ sophon_p5_setup.bat
 /sophon-tui/ 
 # 发布产物
 /dist/
+
+# 工具目录（不入库）
+/tools/
