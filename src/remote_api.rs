@@ -13,6 +13,7 @@
 //   存在 → 直接读它作为系统提示词（ask 对话时作为 system 消息）。
 
 use anyhow::Context;
+use crate::util::sophon_dir;
 
 /// 清单与提示词文件名（都在桌面 sophon 目录下）
 pub const SUB_FILE_NAME: &str = "sophon.sub";
@@ -46,20 +47,7 @@ pub struct Resolved {
     pub from_list: bool,
 }
 
-/// 桌面上的 sophon 目录（SOPHON_DIR 可整体换根；与核心从哪里启动无关）
-pub fn sophon_dir() -> Option<std::path::PathBuf> {
-    if let Ok(p) = std::env::var("SOPHON_DIR") {
-        if !p.trim().is_empty() {
-            return Some(std::path::PathBuf::from(p));
-        }
-    }
-    if let Some(d) = dirs::desktop_dir() {
-        return Some(d.join("sophon"));
-    }
-    dirs::home_dir().map(|h| h.join("Desktop").join("sophon"))
-}
-
-/// 远程 API 清单路径：桌面 sophon 目录 / sophon.sub
+/// 远程 API 清单路径：桌面 sophon 目录 / sophon.sub（目录见 util::sophon_dir）
 pub fn sub_file() -> Option<std::path::PathBuf> {
     sophon_dir().map(|d| d.join(SUB_FILE_NAME))
 }

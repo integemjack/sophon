@@ -64,6 +64,26 @@ impl Paths {
     }
 }
 
+/// 桌面上的 sophon 目录（SOPHON_DIR 可整体换根；与核心从哪里启动无关）。
+/// 远程 API 清单（sophon.sub）、提示词（sophon.prompt）、创建的工具（tools/）都在这里；
+/// 核心在哪个目录运行，工作环境（产物落盘）就还在哪个目录。
+pub fn sophon_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("SOPHON_DIR") {
+        if !p.trim().is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    if let Some(d) = dirs::desktop_dir() {
+        return Some(d.join("sophon"));
+    }
+    dirs::home_dir().map(|h| h.join("Desktop").join("sophon"))
+}
+
+/// 工具目录：桌面 sophon 目录下的 tools 文件夹——创建的工具只能放这里，使用时也从这里读
+pub fn sophon_tools_dir() -> Option<PathBuf> {
+    sophon_dir().map(|d| d.join("tools"))
+}
+
 fn default_data_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
         PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("Sophon")

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod builtin;
+pub mod script;
 pub use builtin::*;
 
 /// 工具执行上下文（工作线程持有；共享状态用各自的锁，不长期持全局锁）
@@ -82,10 +83,18 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn builtin() -> Self {
-        let tools: Vec<Box<dyn Tool>> = vec![
+        let mut tools: Vec<Box<dyn Tool>> = vec![
             // 仅保留 exec：文件/搜索/构建等一切操作都用命令在沙盒内完成
             Box::new(builtin::RunShell),
         ];
+        // 创建的工具只能放在桌面 sophon 目录的 tools 文件夹里，使用时也从这里读（util::sophon_tools_dir）
+        for t in script::load_script_tools() {
+            if tools.iter().any(|b| b.name() == t.name()) {
+                eprintln!("tools: 脚本工具 {} 与已有工具重名，跳过", t.name());
+                continue;
+            }
+            tools.push(Box::new(t));
+        }
         ToolRegistry { tools }
     }
 

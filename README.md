@@ -85,6 +85,27 @@ sophon ask      <prompt>
 **sophon.prompt——系统提示词**：启动时若不存在，核心会把内置提示词写入该文件；
 存在则直接读取它作为系统提示词。`ask` 子命令用选出的地址 / 密钥 / 模型 + 该提示词做一次对话。
 
+## 创建的工具：桌面 sophon 目录的 tools 文件夹
+
+创建的工具**只能**放在 `Desktop\sophon\tools` 里（`SOPHON_DIR` 换根时则在其 tools 下），
+使用时也**只从这里加载**（Agent 运行时自动发现）。每个工具一个 `<名字>.json`：
+
+```json
+{
+  "name": "weather",
+  "title": "查天气",
+  "description": "按城市查询天气",
+  "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+  "command": "python weather.py",
+  "needs_approval": true
+}
+```
+
+执行时参数 JSON 从 stdin 传给 `command`（Windows 走 `cmd /C`，其他走 `sh -c`，
+工作目录 = Agent 的工作目录），stdout 即结果；退出码非 0 视为失败。
+与内置工具重名 / 解析失败的文件跳过并告警；`needs_approval` 默认 true（外部命令默认要审批）。
+`sophon tools` 可列出已加载的工具并确保目录存在。
+
 ## 测试
 
 ```powershell
@@ -129,6 +150,6 @@ cargo test -p sophon-core
 ## 约束
 
 - 内置 OpenAI 兼容引擎（OpenAICompatEngine）地址限本机（127.0.0.1 / localhost）；
-  云端 LLM 走用户显式配置的 remote_api.txt（见上），两者互不影响。
+  云端 LLM 走用户显式配置的 sophon.sub（桌面 sophon 目录，见上），两者互不影响。
 - 联网抓取用本机浏览器 headless，不引第三方下载。
 - 界面层已移除；需要界面时可基于 core 的事件流另行实现。

@@ -6,6 +6,7 @@
 //   sophon get      <url> <outfile> [max_chars]
 //   sophon research <question> <max_pages> <outfile>
 //   sophon ask      <prompt>
+//   sophon tools    （列出已创建的脚本工具）
 // 启动时固定读桌面 sophon 目录（SOPHON_DIR 可换根，与从哪里启动无关）：
 //   sophon.sub——远程 API 清单，从最后一行往上试，拉不到模型列表的行确认后删除；
 //   sophon.prompt——系统提示词，没有则写入内置提示词，有则读取使用；
@@ -15,7 +16,7 @@ use std::time::Duration;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: sophon <search|fetch|get|research|ask> ...");
+        eprintln!("usage: sophon <search|fetch|get|research|ask|tools> ...");
         std::process::exit(2);
     }
     // 提示词：桌面 sophon 目录的 sophon.prompt 不存在则写入内置提示词，存在则读入使用
@@ -142,6 +143,24 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        "tools" => {
+            use sophon_core::tools::Tool;
+            // 列出桌面 sophon 目录 tools 文件夹里的脚本工具（创建的工具只能放这里，使用时也从这里读）
+            let Some(dir) = sophon_core::util::sophon_tools_dir() else {
+                eprintln!("无法定位桌面 sophon 目录（可用 SOPHON_DIR 指定）");
+                std::process::exit(2);
+            };
+            let _ = std::fs::create_dir_all(&dir);
+            let list = sophon_core::tools::script::load_script_tools_from(&dir);
+            println!("工具目录：{}", dir.display());
+            if list.is_empty() {
+                println!("（空——把 <名字>.json 放进该目录即可，格式见 README「创建的工具」）");
+            }
+            for t in &list {
+                println!("- {}\t{}\t{}", t.name(), t.title(), t.description());
+            }
+            std::process::exit(0);
         }
         other => {
             eprintln!("unknown command: {}", other);
