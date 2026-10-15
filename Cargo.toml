@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/sophon-core",
-    "crates/sophon-tui",
 ]
 resolver = "2"
 

@@ -726,7 +726,7 @@ fn truncate_text(s: &str, max_chars: usize) -> String {
 }
 
 /// 是否在 cargo test 环境里：测试二进制都放在 target/*/deps/ 下，
-/// 真实二进制（target/debug/sophon-tui.exe）不在 deps 里。用这个区分，避免递归构建锁死 target。
+/// 真实二进制（如 target/debug/webcli.exe）不在 deps 里。用这个区分，避免递归构建锁死 target。
 fn in_cargo_test() -> bool {
     std::env::current_exe()
         .ok()

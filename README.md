@@ -1,35 +1,42 @@
-# Hermes —— Friday 桌面助理（Rust 版）
+# 智子（Sophon）—— 全自主智能体核心（Rust）
 
-按 `docs/` 里的设计（Friday Qt 版架构、ASSISTANT/REMOTE/TERMINAL/STYLE 等规格），
-用 **Rust + egui/eframe** 重写的桌面端程序。全部本地运行、不联网。
+按 `docs/SOPHON.md` 的定义实现的全自主智能体。**无内置图形 / 终端界面**
+（原 egui 桌面端与后补的 TUI 层已于 2026-10-15 按用户要求移除，历史实现见 git 历史）。
 
-## 功能（对齐 docs，不漏项）
+当前形态：
 
-- **会话与聊天**：侧边栏按工作目录分组、搜索、置顶/改名/删除；对话页 Markdown 渲染、
-  流式输出、工具卡（运行中/成功/失败/待确认/已停止/已拒绝/排队 七态色）、思考块、
-  消息统计、已停止、复制、fork、朗读；输入栏发送/停止/工作中排队（interjection）、
-  附件、模型/权限/思考/工作目录胶囊、「下一轮生效」指示。
-- **Agent 主循环**：回合线程模型（主线程改界面可见状态、工作线程顺序书写）、
-  停止状态机（is_stopping 只认第一次）、审批（approve/deny）、插话、恢复、重试、
-  每轮验证检查点、工作中换模型（下一轮生效）。
-- **工具集**：run_shell（带审批/超时/取消）、read_file、write_file、edit_file、
-  find_files（glob，支持 `*` `?` `{a,b}`）、search_files（正则）、search_keywords、
-  read_terminal、run_in_terminal、update_task_state、delegate_task、run_parallel_tasks、
-  message_agent、stop_agent、wait_agents、read_agent_log。
-- **子 Agent 系统**：团队状态、Agent 树面板**实时**展示每个子智能体的运行/任务/日志/结果，
-  支持并行、后台、嵌套、停止、互发消息。
-- **内置终端**：标签页、ConPTY + VT 模拟（颜色/光标/滚动缓冲 5000 行）、Agent 可读写。
-- **助手页**：时间线、状态板、记忆、话题摘要（本地规则生成）。
-- **MCP 客户端**：连接本机 stdio MCP 服务，取其工具（不联网）。
-- **大脑（引擎）**：默认内置离线引擎（规则路由，零配置可用）；可指向本机跑的
-  OpenAI 兼容服务（Ollama / llama.cpp / LM Studio，**地址限 127.0.0.1 / localhost**，
-  构造时校验，拒绝任何云端地址）。
-- **密钥库**：API Key 只存名字、明文加密落盘（docs §5.3 secrets.json）。
+- `sophon-core`：无界面核心库——会话、引擎、Agent、工具、终端、MCP、
+  自主策略、经验库、自我改进、沙盒 / 压缩 / 回滚 / 自检、联网能力。
+- `webcli`：联网研究命令行（`crates/sophon-core/src/bin/webcli.rs`）。
+
+## 功能
+
+- **数据模型与会话库**：JSON 同构规则（UUID 大写、ISO8601 无毫秒、可选字段不写键）；
+  会话增删改查 / 搜索 / 持久化 / fork。
+- **引擎**：内置离线引擎（规则路由，零配置可用）；本机 OpenAI 兼容引擎
+  （Ollama / llama.cpp / LM Studio，地址限 127.0.0.1 / localhost，构造时校验，拒绝云端）。
+- **Agent 主循环**：回合线程模型、停止状态机、审批、插话、每轮验证检查点、
+  活性看门狗（无输出停 / deadline / 原地打转检测）。
+- **子 Agent 系统**：并行 / 后台 / 嵌套、互发消息、团队状态、用量统计。
+- **工具集**：run_shell / read_file / write_file / edit_file / find_files / search_files /
+  search_keywords / 终端读写 / 任务状态 / 派遣与子 Agent 管理等，+ MCP 动态注册的工具。
+- **内置终端**：ConPTY + VT 模拟（16 色 / 真彩 / 光标 / 5000 行回滚），Agent 可读写。
+- **全自主策略**（autonomy.rs）：三级自主（autonomous / safe / yolo）、破坏性检测、
+  可逆替代（回收站 / 备份 / 临时目录）、错误自愈、交付自检。
+- **经验库**（learning.rs）：问题 → 尝试 → 结果 → 教训，新任务先检索。
+- **自我改进**（selfimprove.rs）：git 分支改自身代码 → cargo check / cargo test 全绿 →
+  合并 → 重新编译；失败自动回滚并记教训。
+- **安全与自省**：沙盒隔离（sandbox.rs）、上下文压缩（context_compress.rs）、
+  回滚（rollback.rs）、自检（selfcheck.rs）。
+- **联网能力**（web.rs）：不调搜索 API——直接抓搜索引擎结果页 + 用本机 Edge/Chrome
+  的 headless 模式渲染 JS 页面（零安装）。
+- **MCP 客户端**：连接本机 stdio MCP 服务，取其工具。
+- **密钥库**：API Key 只以名字流转、明文加密落盘（secrets.json）。
 
 ## 构建
 
-需要 Rust（Windows GNU 工具链）。Windows 上编译 `parking_lot_core` 需要 MinGW binutils
-（`dlltool`/`as`/`ld`），Rust 自带的 self-contained 缺 `as.exe`，所以用 MSYS2 的：
+需要 Rust（Windows GNU 工具链）。编译 `parking_lot_core` 需要 MinGW binutils，
+仓库带了构建脚本自动设 PATH：
 
 ```powershell
 .\build.ps1            # debug
@@ -43,53 +50,62 @@ $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
 cargo build --release
 ```
 
-## 运行
+产物：`target/release/webcli.exe`（核心是库 `sophon_core`，供上层程序链接）。
 
-```powershell
-.\target\release\hermes-app.exe
+## webcli 用法
+
+```text
+webcli search   <bing|baidu> <query> <count> <outfile>
+webcli fetch    <url> <outfile> [max_chars] [timeout_secs] [virtual_ms]
+webcli get      <url> <outfile> [max_chars]
+webcli research <question> <max_pages> <outfile>
 ```
 
-数据默认在 `%APPDATA%\Hermes`（可用 `FRIDAY_HOME` / `FRIDAY_DATA_DIR` 覆盖）。
+搜索结果与页面正文以 Markdown 形式落盘为证据文件（UTF-8）。
 
 ## 测试
 
 ```powershell
 $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
-cargo test -p hermes-core
+cargo test -p sophon-core
 ```
 
-覆盖：glob 匹配、UUID/ISO8601、取消令牌层级、消息树、会话库（增删改查/搜索/持久化）、
-离线路由（找文件/读文件/运行命令/派子 Agent/问答）、本机地址校验（拒绝云端）、
-工具实际执行（run_shell/read/write/edit/find/search）、终端 VT 模拟（文本/颜色）、
-Agent 树（运行/日志/完成）、助手（时间线/记忆/话题摘要）、密钥库。
+覆盖：glob 匹配、UUID / ISO8601、取消令牌层级、消息树、会话库、离线路由、
+本机地址校验（拒绝云端）、工具实际执行、终端 VT 模拟、Agent 树、助手运行时、
+密钥库、自主策略 / 沙盒 / 压缩 / 回滚 / 自检。
 
 ## 结构
 
 ```
-crates/hermes-core/  无界面核心
-  src/models.rs      数据模型（与 docs §5.3 JSON 同构）
-  src/store.rs       会话库/设置/密钥库/引擎库/AppCore
-  src/engine/        ChatEngine 接口 + 内置离线引擎 + 本机 OpenAI 兼容引擎
-  src/agent/         主循环（runner）+ 子 Agent 系统（team）
-  src/tools/         工具接口 + 全部内置工具
-  src/terminal/      ConPTY + VT 模拟器 + 管理器
-  src/assistant/     助手运行时（时间线/状态板/记忆/话题摘要）
-  src/mcp/           MCP 客户端（本机 stdio）
-  src/util/          路径/JSON/取消令牌/主线程命令队列
-crates/hermes-app/   eframe 界面
-  src/main.rs        入口、布局、字体
-  src/sidebar.rs     侧边栏（会话分组）
-  src/chat.rs        对话页（消息流 + 输入栏）
-  src/blocks.rs      消息块渲染（工具卡/思考/文本）
-  src/agent_tree.rs  Agent 树面板（子智能体实时动作）
-  src/terminal_view.rs 内置终端面板
-  src/assistant_view.rs 助手页
-  src/settings_view.rs 设置页
-  src/markdown.rs    极简 Markdown 渲染
-  src/theme.rs       原生观感主题（浅色/深色跟随系统）
+crates/sophon-core/   无界面核心
+  src/models.rs           数据模型
+  src/store/mod.rs        会话库 / 设置 / 密钥库 / 引擎库 / AppCore
+  src/engine/             ChatEngine 接口 + 离线引擎 + 本机 OpenAI 兼容引擎
+  src/agent/              主循环（runner）+ 子 Agent 系统（team）
+  src/tools/              工具接口 + 全部内置工具
+  src/terminal/           ConPTY + VT 模拟器 + 管理器
+  src/assistant/          助手运行时（时间线 / 状态板 / 记忆 / 话题摘要）
+  src/mcp/                MCP 客户端（本机 stdio）
+  src/remote/             远程对接
+  src/autonomy.rs         自主策略
+  src/learning.rs         经验库
+  src/selfimprove.rs      自我改进管道
+  src/sandbox.rs          沙盒隔离
+  src/context_compress.rs 上下文压缩
+  src/rollback.rs         回滚
+  src/selfcheck.rs        自检
+  src/web.rs              联网能力（结果页抓取 + headless 渲染）
+  src/bin/webcli.rs       webcli 命令行入口
+  src/util/               路径 / JSON / 取消令牌 / 主线程命令队列
 ```
+
+## 数据位置
+
+默认在用户数据目录（`FRIDAY_HOME` 换根目录；`FRIDAY_DATA_DIR` / `FRIDAY_CACHE_DIR`
+分别覆盖数据 / 缓存位置）。
 
 ## 约束
 
-- 完全本地资源，不调用任何云端 API、不联网依赖（引擎地址限本机，已测试强制）。
-- 桌面端实时、完整展示所有执行细节（含子智能体动作）——Agent 树面板 + 工具卡 + 终端。
+- 引擎地址限本机（127.0.0.1 / localhost），不调任何云端 API。
+- 联网抓取用本机浏览器 headless，不引第三方下载。
+- 界面层已移除；需要界面时可基于 core 的事件流另行实现。
