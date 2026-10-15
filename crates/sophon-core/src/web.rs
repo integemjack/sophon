@@ -231,18 +231,74 @@ pub fn urlencode(s: &str) -> String {
     out
 }
 
-/// 去 HTML 标签 + 解码常见实体
+/// 去 HTML 标签 + 解码 HTML 实体（命名/十进制数字/十六进制——表来自联网调研 W3Schools 实体参考）
 pub fn strip_tags(s: &str) -> String {
     let t = strip_tags_raw(s);
-    t.replace("&quot;", "\"")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    let decoded = decode_entities(&t);
+    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 解码 HTML 实体：&#NNN; 十进制、&#xHHH;/&#XHHH; 十六进制、常见命名实体。
+/// 实体表覆盖 ISO-8859-1 全部具名实体与中文网页高频符号（R<sub>SI</sub> 演示：据联网调研补充）。
+pub fn decode_entities(s: &str) -> String {
+    const NAMED: &[(&str, &str)] = &[
+        ("quot", "\""), ("amp", "&"), ("lt", "<"), ("gt", ">"), ("nbsp", " "),
+        ("iexcl", "\u{a1}"), ("cent", "\u{a2}"), ("pound", "\u{a3}"), ("curren", "\u{a4}"), ("yen", "\u{a5}"),
+        ("sect", "\u{a7}"), ("uml", "\u{a8}"), ("copy", "\u{a9}"), ("ordf", "\u{aa}"), ("laquo", "\u{ab}"),
+        ("not", "\u{ac}"), ("shy", ""), ("reg", "\u{ae}"), ("macr", "\u{af}"), ("deg", "\u{b0}"),
+        ("plusmn", "\u{b1}"), ("sup2", "\u{b2}"), ("sup3", "\u{b3}"), ("acute", "\u{b4}"), ("micro", "\u{b5}"),
+        ("para", "\u{b6}"), ("middot", "\u{b7}"), ("cedil", "\u{b8}"), ("sup1", "\u{b9}"), ("ordm", "\u{ba}"),
+        ("raquo", "\u{bb}"), ("frac14", "\u{bc}"), ("frac12", "\u{bd}"), ("frac34", "\u{be}"),
+        ("times", "\u{d7}"), ("divide", "\u{f7}"),
+        ("ndash", "\u{2013}"), ("mdash", "\u{2014}"), ("lsquo", "\u{2018}"), ("rsquo", "\u{2019}"),
+        ("sbquo", "\u{201a}"), ("ldquo", "\u{201c}"), ("rdquo", "\u{201d}"), ("bdquo", "\u{201e}"),
+        ("dagger", "\u{2020}"), ("Dagger", "\u{2021}"), ("bull", "\u{2022}"), ("hellip", "\u{2026}"),
+        ("permil", "\u{2030}"), ("prime", "\u{2032}"), ("Prime", "\u{2033}"),
+        ("ensp", "\u{2002}"), ("emsp", "\u{2003}"), ("thinsp", "\u{2009}"), ("zwnj", ""), ("zwj", ""),
+        ("lrm", ""), ("rlm", ""),
+        ("euro", "\u{20ac}"), ("trade", "\u{2122}"),
+        ("larr", "\u{2190}"), ("uarr", "\u{2191}"), ("rarr", "\u{2192}"), ("darr", "\u{2193}"), ("harr", "\u{2194}"),
+        ("minus", "\u{2212}"), ("lowast", "\u{2217}"), ("infin", "\u{221e}"), ("ne", "\u{2260}"),
+        ("le", "\u{2264}"), ("ge", "\u{2265}"), ("sum", "\u{2211}"), ("radic", "\u{221a}"),
+        ("prop", "\u{221d}"), ("ang", "\u{2220}"), ("and", "\u{2227}"), ("or", "\u{2228}"),
+        ("cap", "\u{2229}"), ("cup", "\u{222a}"), ("int", "\u{222b}"), ("there4", "\u{2234}"),
+        ("sim", "\u{223c}"), ("cong", "\u{2245}"), ("asymp", "\u{2248}"), ("equiv", "\u{2261}"),
+        ("alpha", "\u{3b1}"), ("beta", "\u{3b2}"), ("gamma", "\u{3b3}"), ("delta", "\u{3b4}"),
+        ("epsilon", "\u{3b5}"), ("theta", "\u{3b8}"), ("lambda", "\u{3bb}"), ("mu", "\u{bc}"),
+        ("pi", "\u{3c0}"), ("rho", "\u{3c1}"), ("sigma", "\u{3c3}"), ("phi", "\u{3c6}"),
+        ("omega", "\u{3c9}"), ("Alpha", "\u{391}"), ("Beta", "\u{392}"), ("Gamma", "\u{393}"),
+        ("Delta", "\u{394}"), ("Theta", "\u{398}"), ("Lambda", "\u{39b}"), ("Pi", "\u{3a0}"),
+        ("Sigma", "\u{3a3}"), ("Phi", "\u{3a6}"), ("Omega", "\u{3a9}"),
+    ];
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < s.len() {
+        if bytes[i] == b'&' {
+            if let Some(sc) = s[i..].find(';') {
+                let ent = &s[i + 1..i + sc];
+                let decoded = if let Some(hex) = ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X")) {
+                    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32).map(|c| c.to_string())
+                } else if let Some(dec) = ent.strip_prefix('#') {
+                    dec.parse::<u32>().ok().and_then(char::from_u32).map(|c| c.to_string())
+                } else {
+                    NAMED
+                        .iter()
+                        .find(|(n, _)| *n == ent)
+                        .map(|(_, v)| v.to_string())
+                };
+                if let Some(v) = decoded {
+                    out.push_str(&v);
+                    i += sc + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 fn strip_tags_raw(s: &str) -> String {
