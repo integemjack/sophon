@@ -117,7 +117,6 @@ pub fn report_json(items: &[CheckItem]) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::*;
     use super::*;
 
     #[test]

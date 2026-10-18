@@ -5,6 +5,19 @@ use crate::agent::team::{AgentProfile, AgentStatus};
 use crate::models::*;
 use crate::util::CancelToken;
 use serde_json::{json, Value};
+
+/// 子智能体嵌套上限：主=0，子=1，孙=2；到 3 不再往下派（防无限套娃）
+pub const MAX_SUBAGENT_DEPTH: u32 = 3;
+
+/// 派发前的深度闸；超限返回拒绝理由
+pub(crate) fn depth_guard(ctx: &ToolContext) -> Option<ToolOutput> {
+    (ctx.depth >= MAX_SUBAGENT_DEPTH).then(|| {
+        ToolOutput::Err(format!(
+            "子智能体嵌套已达上限（深度 {} ≥ {}）：请自己完成这个子任务，不要再往下派。",
+            ctx.depth, MAX_SUBAGENT_DEPTH
+        ))
+    })
+}
 use std::io::Read;
 
 // ── run_shell ───────────────────────────────────────────
@@ -666,6 +679,9 @@ impl Tool for DelegateTask {
     }
     fn needs_approval(&self, _args: &Value) -> bool { true }
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
+        if let Some(denied) = depth_guard(ctx) {
+            return denied;
+        }
         use crate::prompts::SubagentKind;
         let mut profile: AgentProfile = serde_json::from_value::<AgentProfile>(args["profile"].clone())
             .unwrap_or_default();
@@ -791,6 +807,9 @@ impl Tool for RunParallelTasks {
     }
     fn needs_approval(&self, _args: &Value) -> bool { true }
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
+        if let Some(denied) = depth_guard(ctx) {
+            return denied;
+        }
         use crate::prompts::SubagentKind;
         let tasks = match args["tasks"].as_array() {
             Some(t) => t.clone(),
@@ -1015,6 +1034,9 @@ impl Tool for ReworkAgent {
     }
     fn needs_approval(&self, _args: &Value) -> bool { true }
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
+        if let Some(denied) = depth_guard(ctx) {
+            return denied;
+        }
         let id = args["agent_id"].as_str().unwrap_or("");
         let feedback = args["feedback"].as_str().unwrap_or("");
         let engine = ctx.engine.clone();

@@ -165,7 +165,11 @@ pub fn upgrade_legacy_main(prompt: &mut String) -> bool {
 
 /// 桌面 sophon 目录 prompts/ 覆盖（与 main.md 同一机制）：有就用，没有用内置
 fn overridable(builtin: &str, name: &str) -> String {
-    if let Some(dir) = util::sophon_dir() {
+    overridable_in(util::sophon_dir(), builtin, name)
+}
+
+fn overridable_in(dir: Option<std::path::PathBuf>, builtin: &str, name: &str) -> String {
+    if let Some(dir) = dir {
         if let Ok(text) = std::fs::read_to_string(dir.join("prompts").join(name)) {
             let t = text.trim();
             if !t.is_empty() {
@@ -254,5 +258,19 @@ mod tests {
         assert_eq!(run_mode_prompt(RESEARCH.trim()), run_prompt());
         assert_eq!(run_mode_prompt(LEGACY_RESEARCH), run_prompt());
         assert_eq!(run_mode_prompt("我自己的提示词"), "我自己的提示词");
+    }
+
+    #[test]
+    fn dir_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("prompts");
+        std::fs::create_dir_all(&p).unwrap();
+        // 有覆盖文件 → 用覆盖；空白文件 → 回落内置；没有文件 → 内置
+        std::fs::write(p.join("research.md"), "自定义调研提示词ABC\n").unwrap();
+        assert_eq!(overridable_in(Some(dir.path().to_path_buf()), RESEARCH, "research.md"), "自定义调研提示词ABC");
+        std::fs::write(p.join("research.md"), "  \n").unwrap();
+        assert_eq!(overridable_in(Some(dir.path().to_path_buf()), RESEARCH, "research.md"), RESEARCH.trim());
+        assert_eq!(overridable_in(Some(dir.path().to_path_buf()), RUN, "run.md"), RUN.trim());
+        assert_eq!(overridable_in(None, RESEARCH, "research.md"), RESEARCH.trim());
     }
 }

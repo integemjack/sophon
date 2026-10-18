@@ -739,3 +739,16 @@ fn test_subagent_typed_prompt_and_readonly_gate() {
     }));
     assert!(rejected, "Remove-Item 应被只读闸拒绝并回传");
 }
+
+#[test]
+fn test_subagent_depth_guard() {
+    use crate::tools::builtin::{depth_guard, MAX_SUBAGENT_DEPTH};
+    use crate::tools::ToolOutput;
+    // 主/子/孙（depth 0-2）可以派，曾孙（3）被拒
+    assert!(depth_guard(&test_context(".")).is_none());
+    let mut deep = test_context(".");
+    deep.depth = MAX_SUBAGENT_DEPTH - 1;
+    assert!(depth_guard(&deep).is_none());
+    deep.depth = MAX_SUBAGENT_DEPTH;
+    assert!(matches!(depth_guard(&deep), Some(ToolOutput::Err(_))));
+}
