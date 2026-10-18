@@ -507,7 +507,7 @@ pub fn run_task(
                         result: "模型没有输出动作标记，已提醒其输出 SOPHON_CALL 或 SOPHON_DONE".to_string(),
                     });
                 }
-                for (name, args, raw) in &all {
+                for (name, args, _raw) in &all {
                     from!("→ {} {}", name, args_brief(args));
                     let (good, result) = execute_call(name, args, sandbox, cfg);
                     from!(
@@ -538,7 +538,7 @@ pub fn run_task(
                     &build_verify_msg(goal, &steps, &done_summary),
                     cfg,
                 )?;
-                for (name, args, raw) in &parse_calls(&probe) {
+                for (name, args, _raw) in &parse_calls(&probe) {
                     from!("→ 核实动作：{} {}", name, args_brief(args));
                     let (good, result) = execute_call(name, args, sandbox, cfg);
                     from!(

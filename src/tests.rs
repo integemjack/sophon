@@ -388,6 +388,7 @@ fn test_agent_team() {
     let profile = AgentProfile {
         name: "研究员".to_string(),
         role: "你是研究员".to_string(),
+        kind: String::new(),
         tools: Vec::new(),
         model: None,
     };
@@ -651,4 +652,90 @@ fn test_analyze_image_builds_vision_request() {
     assert!(has_image, "请求应含图像 Media 块");
 
     let _ = std::fs::remove_file(&tmp);
+}
+
+// ── 子智能体：类型化提示词 + 只读闸（借鉴 Claude Code 内置 subagents）──
+
+#[test]
+fn test_subagent_typed_prompt_and_readonly_gate() {
+    use crate::engine::{ChatEngine, EngineEvent, StreamRequest};
+    use crate::agent::team::{run_subagent, AgentProfile, AgentTeamState};
+    use crate::tools::ToolContext;
+    use crate::store::SecretStore;
+    use crate::terminal::TerminalManager;
+    use crate::util::CancelToken;
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// 脚本引擎：第一轮发一个 exec 写命令调用，第二轮返回文本收尾
+    struct ScriptEngine {
+        round: AtomicUsize,
+        requests: Mutex<Vec<StreamRequest>>,
+    }
+    impl ChatEngine for ScriptEngine {
+        fn id(&self) -> &str { "script" }
+        fn title(&self) -> &str { "Script" }
+        fn model(&self) -> &str { "script" }
+        fn supports_tools(&self) -> bool { true }
+        fn stream(&self, req: &StreamRequest, sink: &mut dyn FnMut(EngineEvent)) -> anyhow::Result<()> {
+            let n = self.round.fetch_add(1, Ordering::SeqCst);
+            self.requests.lock().push(req.clone());
+            if n == 0 {
+                sink(EngineEvent::ToolCall {
+                    id: "t1".into(),
+                    name: "exec".into(),
+                    arguments: serde_json::json!({"command": "Remove-Item secret.txt"}),
+                });
+            } else {
+                sink(EngineEvent::Chunk("完成：没找到".into()));
+            }
+            sink(EngineEvent::Done { usage: None });
+            Ok(())
+        }
+    }
+
+    let engine = Arc::new(ScriptEngine { round: AtomicUsize::new(0), requests: Mutex::new(Vec::new()) });
+    let (main_thread, _rx) = crate::util::main_thread::channel();
+    let mut ctx = ToolContext {
+        working_directory: std::env::temp_dir().to_string_lossy().to_string(),
+        conversation_id: "conv-ro".into(),
+        terminal_manager: Arc::new(Mutex::new(TerminalManager::new())),
+        team: Arc::new(Mutex::new(AgentTeamState::new())),
+        task_states: Arc::new(Mutex::new(HashMap::new())),
+        cancel: CancelToken::new(),
+        main_thread,
+        depth: 1,
+        engine: engine.clone(),
+        secrets: Arc::new(Mutex::new(SecretStore::load(std::path::Path::new("secrets.json")))),
+        system_prompt: "主提示词标记XYZ".into(),
+        sandbox: None,
+    };
+    let profile = AgentProfile {
+        name: "侦察员".into(),
+        role: "侦察".into(),
+        kind: "explore".into(),
+        tools: Vec::new(),
+        model: None,
+    };
+    let any_engine: Arc<dyn ChatEngine> = engine.clone();
+    let _result = run_subagent("run-ro", &profile, "找 secret.txt", &any_engine, &mut ctx);
+
+    let reqs = engine.requests.lock();
+    assert!(reqs.len() >= 2, "应有两轮请求");
+    // 1) explore 用类型化提示词，不带主提示词（研究型快且省）
+    let sys = &reqs[0].system;
+    assert!(sys.contains("侦察员"), "应含 explore 类型提示词，实际：{}", &sys[..sys.len().min(120)]);
+    assert!(sys.contains("只读"), "应声明只读边界");
+    assert!(!sys.contains("主提示词标记XYZ"), "研究型不带主提示词");
+    // 2) 写命令被只读闸拒绝，拒绝文案回传给引擎（第二轮请求历史里）
+    let rejected = reqs[1].messages.iter().any(|m| m.blocks.iter().any(|b| match &b.kind {
+        crate::models::BlockKind::Tool { tool } => {
+            tool.status == crate::models::ToolStatus::Failed
+                && tool.result.as_deref().map(|r| r.contains("只读智能体")).unwrap_or(false)
+        }
+        _ => false,
+    }));
+    assert!(rejected, "Remove-Item 应被只读闸拒绝并回传");
 }

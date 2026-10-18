@@ -84,8 +84,19 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     pub fn builtin() -> Self {
         let mut tools: Vec<Box<dyn Tool>> = vec![
-            // 仅保留 exec：文件/搜索/构建等一切操作都用命令在沙盒内完成
+            // exec：文件/搜索/构建等一切操作都用命令在沙盒内完成
             Box::new(builtin::RunShell),
+            // 子智能体编排 + 任务状态 + 杂项（借鉴 Claude Code 的 Task/TodoWrite 工具面）
+            Box::new(builtin::DelegateTask),
+            Box::new(builtin::RunParallelTasks),
+            Box::new(builtin::MessageAgent),
+            Box::new(builtin::StopAgent),
+            Box::new(builtin::WaitAgents),
+            Box::new(builtin::ReworkAgent),
+            Box::new(builtin::ReadAgentLog),
+            Box::new(builtin::UpdateTaskState),
+            Box::new(builtin::ListTools),
+            Box::new(builtin::GetCurrentTime),
         ];
         // 创建的工具只能放在桌面 sophon 目录的 tools 文件夹里，使用时也从这里读（util::sophon_tools_dir）
         for t in script::load_script_tools() {

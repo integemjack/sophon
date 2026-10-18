@@ -19,8 +19,11 @@ use crate::util::sophon_dir;
 pub const SUB_FILE_NAME: &str = "sophon.sub";
 pub const PROMPT_FILE_NAME: &str = "sophon.prompt";
 
-/// 核心内置提示词（首次启动写入 sophon.prompt）
-pub const DEFAULT_PROMPT: &str = "你是智子（Sophon），一个全自主智能体核心。\n职责：根据用户指令进行联网调研与信息整合（search / fetch / get / research），给出准确、简洁、有依据的回答。\n风格：先结论后依据，重要结论给出来源 URL；不编造事实，查不到就直说。";
+/// 核心内置提示词（首次启动写入 sophon.prompt；旧版在 ensure_prompt 里自动升级）
+pub const DEFAULT_PROMPT: &str = crate::prompts::RESEARCH;
+
+/// 旧版内置调研提示词（升级判定用，与升级前版本一致）
+pub const LEGACY_DEFAULT_PROMPT: &str = crate::prompts::LEGACY_RESEARCH;
 /// 探测 /models 的超时
 pub const MODEL_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 /// ask 对话的超时
@@ -57,11 +60,19 @@ pub fn prompt_file() -> Option<std::path::PathBuf> {
     sophon_dir().map(|d| d.join(PROMPT_FILE_NAME))
 }
 
-/// 启动时保证提示词就绪：sophon.prompt 不存在则写入内置提示词；存在则读出来用
+/// 启动时保证提示词就绪：sophon.prompt 不存在则写入内置提示词；
+/// 还是旧版内置调研提示词则自动升级；用户自己改过的原样保留。
 pub fn ensure_prompt() -> anyhow::Result<String> {
     let p = prompt_file().context("无法定位桌面 sophon 目录")?;
     if p.exists() {
-        return std::fs::read_to_string(&p).with_context(|| format!("读取 {}", p.display()));
+        let cur = std::fs::read_to_string(&p).with_context(|| format!("读取 {}", p.display()))?;
+        if cur.split_whitespace().collect::<String>()
+            == LEGACY_DEFAULT_PROMPT.split_whitespace().collect::<String>()
+        {
+            std::fs::write(&p, DEFAULT_PROMPT).with_context(|| format!("写入 {}", p.display()))?;
+            return Ok(DEFAULT_PROMPT.to_string());
+        }
+        return Ok(cur);
     }
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("创建 {}", parent.display()))?;
@@ -480,7 +491,11 @@ mod tests {
         assert!(!pf.exists());
         assert_eq!(ensure_prompt().unwrap(), DEFAULT_PROMPT);
         assert_eq!(std::fs::read_to_string(&pf).unwrap(), DEFAULT_PROMPT);
-        // 提示词已存在 → 原样读取使用，不覆盖
+        // 旧版内置调研提示词 → 自动升级为新版
+        std::fs::write(&pf, LEGACY_DEFAULT_PROMPT).unwrap();
+        assert_eq!(ensure_prompt().unwrap(), DEFAULT_PROMPT);
+        assert_eq!(std::fs::read_to_string(&pf).unwrap(), DEFAULT_PROMPT);
+        // 提示词已存在（用户改过）→ 原样读取使用，不覆盖
         std::fs::write(&pf, "自定义提示词").unwrap();
         assert_eq!(ensure_prompt().unwrap(), "自定义提示词");
         std::env::remove_var("SOPHON_DIR");

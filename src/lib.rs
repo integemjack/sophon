@@ -11,6 +11,7 @@ pub mod mcp;
 pub mod remote;
 pub mod remote_api;
 pub mod autonomy;
+pub mod prompts;
 pub mod learning;
 pub mod selfimprove;
 pub mod sandbox;

@@ -77,12 +77,17 @@ pub fn run(sandbox: &Sandbox) -> Vec<CheckItem> {
         ok: sandbox.env_pairs().len() == 3,
         detail: format!("实例 {} 深度 {}", sandbox.instance_id, sandbox.depth),
     });
-    // 6. 工具集:仅 exec
+    // 6. 工具集：exec + 子智能体编排 + 任务状态都在
     let names = crate::tools::ToolRegistry::builtin().names();
+    let required = [
+        "exec", "delegate_task", "run_parallel_tasks", "message_agent", "stop_agent",
+        "wait_agents", "rework_agent", "read_agent_log", "update_task_state",
+    ];
+    let missing: Vec<&str> = required.iter().filter(|r| !names.contains(&r.to_string())).cloned().collect();
     items.push(CheckItem {
-        name: "工具集仅 exec",
-        ok: names == vec!["exec".to_string()],
-        detail: format!("{:?}", names),
+        name: "工具集齐备",
+        ok: missing.is_empty(),
+        detail: if missing.is_empty() { format!("{} 个工具：{:?}", names.len(), names) } else { format!("缺：{:?}", missing) },
     });
     items
 }
@@ -123,7 +128,7 @@ mod tests {
         assert!(items.len() >= 5);
         // 沙盒可写、exec、压缩器、工具集在这台开发机上必须通过
         for it in &items {
-            if it.name == "沙盒目录可写" || it.name == "上下文自动压缩" || it.name == "工具集仅 exec" {
+            if it.name == "沙盒目录可写" || it.name == "上下文自动压缩" || it.name == "工具集齐备" {
                 assert!(it.ok, "{} 应通过: {}", it.name, it.detail);
             }
         }

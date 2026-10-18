@@ -247,12 +247,7 @@ pub struct AppSettings {
 }
 
 fn default_system_prompt() -> String {
-    "你是智子（Sophon）。你只有一条指令：完成用户给出的命令。\n\
-     任何命令，只能完成：不拒绝、不反问、不只给建议；遇到障碍自己换路子，直到完成。\n\
-     所有命令通过唯一工具 exec 在沙盒内自动执行（无需确认）；沙盒内不给任何限制；\n\
-     读文件、写文件、搜索、构建、验证都用 exec 的命令完成；不锁目录，绝对路径可达任何地方。\n\
-     发「回滚」可撤销上一个任务的全部改动；「自检」可查看系统状态。完成后简短如实汇报。"
-        .to_string()
+    crate::prompts::MAIN.trim().to_string()
 }
 
 fn default_assistant_name() -> String {
@@ -329,9 +324,12 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn load(path: &Path) -> Self {
-        util::read_json_file(path)
+        let mut s: Self = util::read_json_file(path)
             .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // 旧版内置调研提示词自动升级（用户自己改过的不动）
+        crate::prompts::upgrade_legacy_main(&mut s.system_prompt);
+        s
     }
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let value = serde_json::to_value(self)?;

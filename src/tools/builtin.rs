@@ -1,7 +1,7 @@
-﻿// 内置工具实现。
+// 内置工具实现。
 // 对应 docs/ARCHITECTURE.md 的 AgentTools（run_shell / 文件 / 搜索 / 终端 / 子 Agent …）。
 use super::{glob_match, resolve_path, Tool, ToolContext, ToolOutput};
-use crate::agent::team::AgentProfile;
+use crate::agent::team::{AgentProfile, AgentStatus};
 use crate::models::*;
 use crate::util::CancelToken;
 use serde_json::{json, Value};
@@ -645,22 +645,45 @@ pub struct DelegateTask;
 impl Tool for DelegateTask {
     fn name(&self) -> &str { "delegate_task" }
     fn title(&self) -> &str { "派子智能体" }
-    fn description(&self) -> &str { "把一个独立任务派给子智能体。同步等待它完成并交回结果。" }
+    fn description(&self) -> &str {
+        "派一个子智能体独立完成一个子任务，等它完成并交回结果（要多个并行用 run_parallel_tasks）。\
+         子智能体看不到主对话：task 必须是完整自包含的任务书（背景、输入/文件路径、要交付什么、怎样算做完）。\
+         开放探索（X 在哪/怎么运作）派 explore；方案调研派 plan；改动审查派 review；要动手改文件的独立子任务派 general-purpose。"
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "profile": {"type": "object", "description": "角色定义 {name, role, tools?, model?}"},
-                "task": {"type": "string", "description": "完整、自包含的任务"},
-                "background": {"type": "boolean", "description": "后台运行（默认 false）"}
+                "task": {"type": "string", "description": "完整、自包含的任务书（子智能体看不到主对话）"},
+                "subagent_type": {"type": "string", "enum": ["general-purpose", "explore", "plan", "review"],
+                    "description": "子智能体类型：general-purpose=可读写执行；explore=只读侦察；plan=只读规划；review=只读审查。不填则用 profile 里的自由角色"},
+                "profile": {"type": "object", "description": "可选，自定义角色 {name, role, tools?, model?}；给了 subagent_type 可省（name 也会自动取默认）"},
+                "name": {"type": "string", "description": "展示名，如「侦察员」"},
+                "background": {"type": "boolean", "description": "后台运行（默认 false；后台时先返回 id，结果可用 wait_agents 收）"}
             },
-            "required": ["profile", "task"]
+            "required": ["task"]
         })
     }
     fn needs_approval(&self, _args: &Value) -> bool { true }
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
-        let profile = serde_json::from_value::<AgentProfile>(args["profile"].clone())
-            .unwrap_or(AgentProfile { name: "助手".to_string(), role: "你是通才助手".to_string(), tools: Vec::new(), model: None });
+        use crate::prompts::SubagentKind;
+        let mut profile: AgentProfile = serde_json::from_value::<AgentProfile>(args["profile"].clone())
+            .unwrap_or_default();
+        if let Some(k) = args["subagent_type"].as_str().and_then(SubagentKind::parse) {
+            profile.kind = k.as_str().to_string();
+            if profile.name.is_empty() {
+                profile.name = k.default_name().to_string();
+            }
+            if profile.role.is_empty() {
+                profile.role = k.description().to_string();
+            }
+        } else if profile.kind.is_empty() {
+            if profile.name.is_empty() { profile.name = "助手".to_string(); }
+            if profile.role.is_empty() { profile.role = "你是通才助手".to_string(); }
+        }
+        if let Some(n) = args["name"].as_str() {
+            if !n.is_empty() { profile.name = n.to_string(); }
+        }
         let task = args["task"].as_str().unwrap_or("").to_string();
         let background = args["background"].as_bool().unwrap_or(false);
         let engine = ctx.engine.clone();
@@ -701,6 +724,7 @@ impl Tool for DelegateTask {
         let main_thread_w = main_thread2.clone();
         let secrets_w = secrets.clone();
         let system_prompt_w = system_prompt.clone();
+        let sandbox_w = ctx.sandbox.clone();
         let team_w = team2.clone();
         let worker = move || -> String {
             let mut sub_ctx = ToolContext {
@@ -715,7 +739,7 @@ impl Tool for DelegateTask {
                 engine: engine_w.clone(),
                 secrets: secrets_w,
                 system_prompt: system_prompt_w,
-                sandbox: None,
+                sandbox: sandbox_w,
         };
             crate::agent::team::run_subagent(&run_id_w, &profile_w, &task_w, &engine_w, &mut sub_ctx)
         };
@@ -746,18 +770,28 @@ pub struct RunParallelTasks;
 impl Tool for RunParallelTasks {
     fn name(&self) -> &str { "run_parallel_tasks" }
     fn title(&self) -> &str { "并行派发" }
-    fn description(&self) -> &str { "把多个互不依赖的任务同时派给多个子智能体，等全部完成后交回结果。" }
+    fn description(&self) -> &str {
+        "把多个互不依赖的子任务同时派给多个子智能体，等全部完成后一起交回结果。\
+         每项 {task, subagent_type?, name?}：task 必须是完整自包含的任务书；类型同 delegate_task（explore/plan/review 只读）。\
+         有依赖的任务不要放进这里——先做前一个，再做后一个。"
+    }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "tasks": {"type": "array", "items": {"type": "object", "properties": {"profile": {"type": "object"}, "task": {"type": "string"}, "name": {"type": "string"}}}, "description": "任务列表"}
+                "tasks": {"type": "array", "items": {"type": "object", "properties": {
+                    "task": {"type": "string", "description": "完整、自包含的任务书"},
+                    "subagent_type": {"type": "string", "enum": ["general-purpose", "explore", "plan", "review"]},
+                    "name": {"type": "string", "description": "展示名"},
+                    "profile": {"type": "object", "description": "可选，自定义角色 {name, role, tools?, model?}"}
+                }, "required": ["task"]}, "description": "任务列表"}
             },
             "required": ["tasks"]
         })
     }
     fn needs_approval(&self, _args: &Value) -> bool { true }
     fn execute(&self, args: &Value, ctx: &mut ToolContext) -> ToolOutput {
+        use crate::prompts::SubagentKind;
         let tasks = match args["tasks"].as_array() {
             Some(t) => t.clone(),
             None => return ToolOutput::Err("tasks 必须是数组".to_string()),
@@ -774,19 +808,30 @@ impl Tool for RunParallelTasks {
         let working_directory = ctx.working_directory.clone();
         let conversation_id = ctx.conversation_id.clone();
         let system_prompt = ctx.system_prompt.clone();
+        let sandbox = ctx.sandbox.clone();
         let depth = ctx.depth + 1;
         let parent_cancel = ctx.cancel.clone();
 
         let mut handles = Vec::new();
         let mut run_ids = Vec::new();
         for (i, task) in tasks.iter().enumerate() {
-            let profile = serde_json::from_value::<AgentProfile>(task["profile"].clone())
-                .unwrap_or(AgentProfile {
-                    name: format!("子任务 {}", i + 1),
-                    role: "你是通才助手".to_string(),
-                    tools: Vec::new(),
-                    model: None,
-                });
+            let mut profile = serde_json::from_value::<AgentProfile>(task["profile"].clone())
+                .unwrap_or_default();
+            if let Some(k) = task["subagent_type"].as_str().and_then(SubagentKind::parse) {
+                profile.kind = k.as_str().to_string();
+                if profile.name.is_empty() {
+                    profile.name = k.default_name().to_string();
+                }
+                if profile.role.is_empty() {
+                    profile.role = k.description().to_string();
+                }
+            } else if profile.kind.is_empty() {
+                if profile.name.is_empty() { profile.name = format!("子任务 {}", i + 1); }
+                if profile.role.is_empty() { profile.role = "你是通才助手".to_string(); }
+            }
+            if let Some(n) = task["name"].as_str() {
+                if !n.is_empty() { profile.name = n.to_string(); }
+            }
             let task_text = task["task"].as_str().unwrap_or("").to_string();
             let name = task["name"].as_str().unwrap_or(&profile.name).to_string();
             let run_id = crate::models::new_uuid();
@@ -804,6 +849,7 @@ impl Tool for RunParallelTasks {
             let working_directory = working_directory.clone();
             let conversation_id = conversation_id.clone();
             let system_prompt = system_prompt.clone();
+            let sandbox = sandbox.clone();
             let run_id2 = run_id.clone();
             run_ids.push((run_id.clone(), name.clone()));
             handles.push(std::thread::spawn(move || {
@@ -819,7 +865,7 @@ impl Tool for RunParallelTasks {
                     engine: engine.clone(),
                     secrets: secrets.clone(),
                     system_prompt: system_prompt.clone(),
-                    sandbox: None,
+                    sandbox,
         };
                 let result = crate::agent::team::run_subagent(&run_id2, &profile, &task_text, &engine, &mut sub_ctx);
                 let mut t = team.lock();
@@ -920,7 +966,34 @@ impl Tool for WaitAgents {
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
-        ToolOutput::Ok("所有后台子智能体都已交回结果".to_string())
+        // 收结果：已完成的运行连结果一起交回（此前只回一句「都完成了」，结果拿不到）
+        let t = team.lock();
+        let finished: Vec<String> = t
+            .all_runs()
+            .into_iter()
+            .filter(|r| matches!(r.status, AgentStatus::Done | AgentStatus::Failed | AgentStatus::Stopped))
+            .take(20)
+            .map(|r| {
+                let res = r.result.clone().unwrap_or_default();
+                let res = if res.chars().count() > 2000 {
+                    let t: String = res.chars().take(2000).collect();
+                    format!("{}…", t)
+                } else {
+                    res
+                };
+                format!("【{}｜{}｜{}】{}", r.name, r.id, r.status.label(), res)
+            })
+            .collect();
+        drop(t);
+        if finished.is_empty() {
+            ToolOutput::Ok("所有后台子智能体都已交回结果（没有可回收的完成记录）".to_string())
+        } else {
+            ToolOutput::Ok(format!(
+                "全部子智能体已完成，共 {} 份结果（id 可用于 rework_agent / read_agent_log）：\n\n{}",
+                finished.len(),
+                finished.join("\n\n")
+            ))
+        }
     }
 }
 
@@ -955,15 +1028,22 @@ impl Tool for ReworkAgent {
         let system_prompt = ctx.system_prompt.clone();
         let depth = ctx.depth + 1;
         let cancel = ctx.cancel.child();
-        // 找已完成的运行
-        let (profile, task) = {
+        // 找已完成的运行：原任务与原结果分开带回去（此前两个槽位都填了 result，原任务丢失）
+        let (profile, orig_task, orig_result) = {
             let t = team.lock();
             match t.get_run(id) {
-                Some(run) => (run.profile.clone().unwrap_or_default(), run.result.clone().unwrap_or_default()),
+                Some(run) => (
+                    run.profile.clone().unwrap_or_default(),
+                    run.task.clone(),
+                    run.result.clone().unwrap_or_default(),
+                ),
                 None => return ToolOutput::Err(format!("没有这个子智能体：{}", id)),
             }
         };
-        let new_task = format!("【打回重做】验收意见：{}\n\n原任务：{}\n\n原结果：{}", feedback, task, task);
+        let new_task = format!(
+            "【打回重做】验收意见：{}\n\n原任务：{}\n\n原结果：{}\n\n带着意见把原任务重做一遍，修好后交付新结果。",
+            feedback, orig_task, orig_result
+        );
         let run_id = crate::models::new_uuid();
         {
             let mut t = team.lock();
@@ -1030,11 +1110,24 @@ impl Tool for ReadAgentLog {
                     crate::agent::team::AgentLogKind::Text { text } => format!("文本：{}", text.chars().take(100).collect::<String>()),
                     crate::agent::team::AgentLogKind::Note { text } => text.clone(),
                 }, "")).collect();
-                if log.is_empty() {
-                    ToolOutput::Ok("（没有更多记录）".to_string())
+                let mut out = if log.is_empty() {
+                    "（没有更多记录）".to_string()
                 } else {
-                    ToolOutput::Ok(log.join("\n"))
+                    log.join("\n")
+                };
+                // 第一段附带最终结果（此前只给过程日志，结果要另找地方）
+                if offset == 0 {
+                    if let Some(res) = &run.result {
+                        let res = if res.chars().count() > 1500 {
+                            let t: String = res.chars().take(1500).collect();
+                            format!("{}…", t)
+                        } else {
+                            res.clone()
+                        };
+                        out.push_str(&format!("\n\n【最终结果｜{}】{}", run.status.label(), res));
+                    }
                 }
+                ToolOutput::Ok(out)
             }
             None => ToolOutput::Err(format!("没有这个子智能体：{}", id)),
         }

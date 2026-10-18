@@ -10,6 +10,7 @@
 // 启动时固定读桌面 sophon 目录（SOPHON_DIR 可换根，与从哪里启动无关）：
 //   sophon.sub——远程 API 清单，从最后一行往上试，拉不到模型列表的行确认后删除；
 //   sophon.prompt——系统提示词，没有则写入内置提示词，有则读取使用；
+//   还是旧版内置调研版时自动升级；run 模式在提示词仍是内置调研版时改用长程模式提示词（prompts/run.md）。
 // 核心在哪个目录运行，工作环境（产物落盘）就在哪个目录。
 use std::time::Duration;
 
@@ -219,11 +220,13 @@ fn main() {
             eprintln!("沙盒：{}", sandbox.root.display());
             eprintln!("目标：{}（最多 {} 轮）", goal, max_rounds);
             let cfg = sophon_core::agent_loop::LoopConfig { max_rounds, ..Default::default() };
+            // 长程模式有自己的角色纪律：提示词还是内置调研版时改用 run.md（用户自定义则尊重原样）
+            let run_system = sophon_core::prompts::run_mode_prompt(&system_prompt);
             let append_note = match sophon_core::remote_api::sub_file() {
                 Some(pf) => sophon_core::remote_api::append_tool_note(&pf.display().to_string()),
                 None => String::new(),
             };
-            match sophon_core::agent_loop::run_task(&goal, api, &system_prompt, &cfg, &sandbox, &append_note) {
+            match sophon_core::agent_loop::run_task(&goal, api, &run_system, &cfg, &sandbox, &append_note) {
                 Ok(o) => {
                     eprintln!("═══ 结果 ═══");
                     eprintln!(

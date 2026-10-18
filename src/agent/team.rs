@@ -11,12 +11,24 @@ use std::sync::Arc;
 /// 子 Agent 角色（对应 docs 的 AgentProfile）
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AgentProfile {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub role: String,
+    /// 类型（prompts::SubagentKind::as_str；空 = 旧式自由角色，用 role 拼）
+    #[serde(default)]
+    pub kind: String,
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
+}
+
+impl AgentProfile {
+    /// 类型（kind 解析不了时给默认 General）
+    pub fn subagent_kind(&self) -> crate::prompts::SubagentKind {
+        crate::prompts::SubagentKind::parse_or_default(&self.kind)
+    }
 }
 
 /// 运行状态（REMOTE.md §5 AgentRun.status）
@@ -245,12 +257,21 @@ pub fn run_subagent(
     engine: &Arc<dyn ChatEngine>,
     ctx: &mut ToolContext,
 ) -> String {
-    let system = format!(
-        "{}\n\n你是子智能体「{}」。你的角色：{}\n\n\
-         你要完成用户交给你的任务。用工具完成，每步如实汇报。\
-         完成后把最终结果作为最后一段文字返回（不要只说「完成了」）。",
-        ctx.system_prompt, profile.name, profile.role
-    );
+    // 系统提示词：有类型 → 类型化提示词（借鉴 Claude Code 内置 subagents：
+    // 研究型只读、不带主提示词，快且省）；无类型 → 旧式主提示词 + role 拼。
+    let has_kind = crate::prompts::SubagentKind::parse(&profile.kind).is_some();
+    let kind = profile.subagent_kind();
+    let system = if has_kind {
+        crate::prompts::subagent_system(kind, &ctx.working_directory)
+    } else {
+        format!(
+            "{}\n\n你是子智能体「{}」。你的角色：{}\n\n\
+             你要完成用户交给你的任务。用工具完成，每步如实汇报。\
+             完成后把最终结果作为最后一段文字返回（不要只说「完成了」）。",
+            ctx.system_prompt, profile.name, profile.role
+        )
+    };
+    let readonly = has_kind && kind.readonly();
     let mut messages = vec![ChatMessage::user(task)];
     let mut final_text = String::new();
     let max_rounds = 25;
@@ -329,7 +350,20 @@ pub fn run_subagent(
         // 执行工具调用
         for (call_id, name, arguments) in &tool_calls {
             log_tool(run_id, ctx, name, ToolStatus::Running, "");
-            let output = registry.execute(name, arguments, ctx);
+            // 只读闸（explore/plan/review）：exec 命令必须过只读白名单
+            let output = if readonly && name == "exec" {
+                let cmd = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                if crate::autonomy::is_readonly_command(cmd) {
+                    registry.execute(name, arguments, ctx)
+                } else {
+                    ToolOutput::Err(format!(
+                        "只读智能体（{}）：这条命令不在只读白名单，已被拒绝。只能读：Get-Content / Get-ChildItem / Select-String / git status|log|show|diff 等。",
+                        kind.label()
+                    ))
+                }
+            } else {
+                registry.execute(name, arguments, ctx)
+            };
             match &output {
                 ToolOutput::Ok(result) => {
                     log_tool(run_id, ctx, name, ToolStatus::Success, &truncate(result, 200));

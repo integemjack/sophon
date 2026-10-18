@@ -201,7 +201,7 @@ impl AgentRunner {
     ) {
         // 读历史与配置（短暂加锁，克隆出来）
         let (history, system_prompt, engine, tools_descriptors, working_directory, permission_mode,
-             require_approval, thinking, temperature, secrets, terminal_manager, team, task_states,
+             _require_approval, thinking, temperature, secrets, terminal_manager, team, task_states,
              main_thread, settings, lessons) = {
             let c = core.lock();
             let conv = match c.store.get(&conversation_id) {
@@ -621,7 +621,7 @@ impl AgentRunner {
                 };
 
                 // 记录结果；失败时查错误模式库（P4：同类错误第 2 次直接给已知修法）
-                let (mut status, mut result_text, mut error_text) = match result {
+                let (status, mut result_text, mut error_text) = match result {
                     ToolOutput::Ok(r) => {
                         if is_write {
                             wrote_something = true;

@@ -87,7 +87,8 @@ enum RemoteCommand {
     Disconnect,
     /// 发送 JSON-RPC 请求（方法 + 参数），返回 id
     Request { method: String, params: Value },
-    /// 发送原始 JSON（调试）
+    /// 发送原始 JSON（调试；暂未接入命令通道）
+    #[allow(dead_code)]
     Raw(String),
 }
 

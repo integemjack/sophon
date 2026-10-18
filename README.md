@@ -17,9 +17,16 @@
   （Ollama / llama.cpp / LM Studio，地址限 127.0.0.1 / localhost，构造时校验，拒绝云端）。
 - **Agent 主循环**：回合线程模型、停止状态机、审批、插话、每轮验证检查点、
   活性看门狗（无输出停 / deadline / 原地打转检测）。
-- **子 Agent 系统**：并行 / 后台 / 嵌套、互发消息、团队状态、用量统计。
-- **工具集**：run_shell / read_file / write_file / edit_file / find_files / search_files /
-  search_keywords / 终端读写 / 任务状态 / 派遣与子 Agent 管理等，+ MCP 动态注册的工具。
+- **子 Agent 系统**：并行 / 后台 / 嵌套、互发消息、团队状态、用量统计；
+  四个内置子智能体类型（general-purpose / explore / plan / review，借鉴 Claude Code）：
+  类型化专属提示词，explore/plan/review 受只读命令闸（白名单 + 写特征拒绝）。
+- **工具集**：exec（一切读 / 写 / 搜 / 建 / 验都用命令在沙盒内完成）
+  + 子智能体编排（delegate_task / run_parallel_tasks / message_agent / stop_agent /
+  wait_agents / rework_agent / read_agent_log）+ 任务状态（update_task_state）+ 杂项；
+  + MCP 动态注册的工具。
+- **提示词系统**（prompts.rs + prompts/）：内置默认主提示词（8 段式，借鉴 Claude Code）
+  编译期嵌入、零配置可用，`SOPHON_DIR/prompts/main.md` 可覆盖；
+  旧版内置提示词在 settings 加载时自动升级（用户改过的不动）。
 - **内置终端**：ConPTY + VT 模拟（16 色 / 真彩 / 光标 / 5000 行回滚），Agent 可读写。
 - **全自主策略**（autonomy.rs）：三级自主（autonomous / safe / yolo）、破坏性检测、
   可逆替代（回收站 / 备份 / 临时目录）、错误自愈、交付自检。

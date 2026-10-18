@@ -2,7 +2,6 @@
 // 三级 autonomous（默认）/ safe / yolo；自动审批、破坏性检测、可逆替代、硬拒绝列表。
 // 由 agent/runner.rs 在每个工具调用前调用 check_shell_command / approve_tool。
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// 自主级别
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +103,94 @@ pub fn is_hard_denied(cmd: &str) -> Option<String> {
         }
     }
     None
+}
+
+// ── 只读命令闸（explore / plan / review 子智能体）──────
+
+/// 只读命令判断：借鉴 Claude Code Explore 子智能体的只读 Bash 闸（白名单 + 写特征拒绝）。
+/// 按 ; && || | 分段，每段首词必须在只读白名单；出现重定向 / 写命令特征直接拒绝。
+pub fn is_readonly_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    // 「X --version」只读放行（先于写特征检查：python -c 危险但 python --version 无害）
+    let tokens_all: Vec<&str> = cmd.split_whitespace().collect();
+    if tokens_all.len() == 2 && (tokens_all[1] == "--version" || tokens_all[1] == "-V" || tokens_all[1] == "-v") {
+        return true;
+    }
+    // 写特征（任意位置出现即拒）：重定向、写文件 / 删除 / 移动 / 下载 / 执行任意代码 / 改变状态的 git 子命令
+    const WRITE_MARKS: &[&str] = &[
+        ">>", ">", "set-content", "out-file", "add-content", "new-item", "remove-item",
+        "del ", "erase ", "rm ", "rd ", "rmdir", "move-item", "copy-item",
+        "rename-item", "foreach-object", "% {", "invoke-", "iex ", "start-process", "start-job",
+        "start-service", "stop-process", "stop-service", "tee", "curl", "wget", "git commit",
+        "git push", "git pull", "git reset", "git checkout", "git restore", "git clean",
+        "git merge", "git rebase", "git stash", "git apply", "git rm", "git mv", "npm ",
+        "pnpm ", "yarn ", "pip ", "cargo ", "dotnet ", "go ", "make", "python", "node ",
+    ];
+    for m in WRITE_MARKS {
+        if lower.contains(m) {
+            return false;
+        }
+    }
+    // 只读白名单（每段首词）
+    const READ_HEADS: &[&str] = &[
+        "get-content", "gc", "cat", "type", "get-childitem", "gci", "ls", "dir", "get-item",
+        "gi", "test-path", "get-command", "get-date", "get-location", "get-process", "ps",
+        "get-filehash", "get-member", "get-help", "measure-object", "select-string", "sls",
+        "findstr", "find", "grep", "rg", "head", "tail", "wc", "pwd", "echo", "write-output",
+        "whoami", "where", "which", "tree", "sort", "sort-object", "select-object",
+        "where-object", "format-list", "format-table", "fl", "ft", "git", "man", "help",
+        "more", "less",
+    ];
+    // 分段：; && || |（&& 与 || 先于单字符）
+    let mut segs: Vec<&str> = Vec::new();
+    let mut rest: &str = cmd;
+    while let Some(pos) = ["&&", "||", ";", "|"]
+        .iter()
+        .filter_map(|s| rest.find(s))
+        .min()
+    {
+        segs.push(&rest[..pos]);
+        let sep_len = if rest[pos..].starts_with("&&") || rest[pos..].starts_with("||") { 2 } else { 1 };
+        rest = &rest[pos + sep_len..];
+    }
+    segs.push(rest);
+    for seg in segs {
+        let seg = seg.trim();
+        if seg.is_empty() {
+            return false;
+        }
+        let tokens: Vec<&str> = seg.split_whitespace().collect();
+        let head = tokens[0].to_lowercase();
+        // --version / -V 查询放行（python --version 等）
+        if tokens.len() == 2 && (tokens[1] == "--version" || tokens[1] == "-V") {
+            continue;
+        }
+        if head == "git" {
+            // git 只读子命令；branch / tag 只允许查询形态
+            const GIT_RO: &[&str] = &[
+                "status", "log", "show", "diff", "blame", "ls-files", "shortlog",
+                "describe", "rev-parse", "reflog", "grep", "help", "version",
+            ];
+            let Some(sub) = tokens.get(1) else { return false };
+            let sub = sub.to_lowercase();
+            if GIT_RO.contains(&sub.as_str()) {
+                continue;
+            }
+            if (sub == "branch" || sub == "tag")
+                && tokens[2..].iter().all(|a| {
+                    let a = a.to_lowercase();
+                    a.starts_with("-") && a != "-d" && a != "-d" && a != "--delete"
+                })
+            {
+                continue;
+            }
+            return false;
+        }
+        if !READ_HEADS.contains(&head.as_str()) {
+            return false;
+        }
+    }
+    true
 }
 
 // ── 破坏性检测 ─────────────────────────────────────────
@@ -356,5 +443,33 @@ mod tests {
         assert!(matches!(approve_tool("run_shell", true, AutonomyMode::Autonomous), Decision::Allow));
         assert!(matches!(approve_tool("write_file", true, AutonomyMode::Safe), Decision::Confirm(_)));
         assert!(matches!(approve_tool("read_file", false, AutonomyMode::Safe), Decision::Allow));
+    }
+
+    #[test]
+    fn readonly_gate() {
+        // 只读：放行
+        assert!(is_readonly_command("Get-Content src/main.rs"));
+        assert!(is_readonly_command("Get-ChildItem -Recurse src | Select-String TODO"));
+        assert!(is_readonly_command("git status"));
+        assert!(is_readonly_command("git log --oneline -5"));
+        assert!(is_readonly_command("git diff HEAD~1"));
+        assert!(is_readonly_command("git branch -a"));
+        assert!(is_readonly_command("rg 'fn main' src"));
+        assert!(is_readonly_command("pwd; ls; cat a.txt"));
+        assert!(is_readonly_command("Get-Content a.md | Measure-Object -Line"));
+        assert!(is_readonly_command("python --version"));
+        // 写入 / 执行类：拒绝
+        assert!(!is_readonly_command("Remove-Item a.txt"));
+        assert!(!is_readonly_command("Set-Content a.txt 'x'"));
+        assert!(!is_readonly_command("echo hi > out.txt"));
+        assert!(!is_readonly_command("git commit -m x"));
+        assert!(!is_readonly_command("git push"));
+        assert!(!is_readonly_command("git branch -D tmp"));
+        assert!(!is_readonly_command("cargo build"));
+        assert!(!is_readonly_command("npm install"));
+        assert!(!is_readonly_command("Invoke-WebRequest https://x -OutFile a"));
+        assert!(!is_readonly_command("python -c \"open('a','w')\""));
+        assert!(!is_readonly_command("ls; Remove-Item b"));
+        assert!(!is_readonly_command("cat a | Out-File b"));
     }
 }
